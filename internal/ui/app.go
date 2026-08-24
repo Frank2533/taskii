@@ -94,6 +94,12 @@ type Options struct {
 	// Mock runs the app against generated sample data: no read from or write
 	// to data/tasks.json, so a demo/screenshot run never touches real data.
 	Mock bool
+	// Vault is the Obsidian vault to index. Empty disables the vault-backed
+	// views rather than preventing startup.
+	Vault string
+	// Location governs every date boundary. Never nil by the time NewApp
+	// returns.
+	Location *time.Location
 	// Simple renders a single full-screen pane: the greeting in a fixed left
 	// column, and one list merging today's tasks, overdue tasks and notes in
 	// creation order beside it.

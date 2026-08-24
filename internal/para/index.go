@@ -106,13 +106,13 @@ func (idx *Index) AreaNames() []string {
 
 // Event is a dated thing to show on a calendar or agenda.
 type Event struct {
-	Date    time.Time
-	AllDay  bool
-	Title   string
-	Key     string // Jira key when the source is a ticket
-	Kind    string // "ticket" | "project"
-	Path    string
-	Status  string
+	Date   time.Time
+	AllDay bool
+	Title  string
+	Key    string // Jira key when the source is a ticket
+	Kind   string // "ticket" | "project"
+	Path   string
+	Status string
 }
 
 // Events collects everything in the vault that carries a date.

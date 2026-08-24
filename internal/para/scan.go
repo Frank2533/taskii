@@ -219,12 +219,12 @@ func parseCheckbox(trimmed string) (done bool, text string, ok bool) {
 
 // Index is a whole vault, parsed.
 type Index struct {
-	Vault    string
-	Tickets  []Ticket
-	Projects []Project
-	Areas    []Area
+	Vault     string
+	Tickets   []Ticket
+	Projects  []Project
+	Areas     []Area
 	ScannedAt time.Time
-	Loc      *time.Location
+	Loc       *time.Location
 }
 
 // Scan walks the vault and builds an index. loc governs how bare dates are

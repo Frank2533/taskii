@@ -16,6 +16,46 @@ Track today's tasks and appointments, see overdue items at a glance, run a Pomod
 </tr>
 </table>
 
+## Obsidian PARA views
+
+This fork adds three screens on top of the dashboard, switched with `1`/`2`/`3`:
+
+| View | What it shows |
+|---|---|
+| **Dashboard** | today, overdue, notes, reports, pomodoro — unchanged |
+| **PARA** | an Obsidian vault as Areas / Projects / tickets, with each note's tasks |
+| **Calendar** | an agenda built from ticket due dates, project targets and timed tasks |
+
+Point it at a vault with `-vault`, or let it detect whichever vault Obsidian
+has open. With no vault, the dashboard works exactly as before.
+
+Reads parse the vault's markdown directly, so browsing stays fast and works
+with Obsidian closed. Actions that need plugin logic — fetching from Jira,
+transitioning a status, adding a comment — run through the official Obsidian
+CLI, which you enable in **Settings > General > Advanced**.
+
+**In the PARA view:** `a` adds a task to the selected note, `enter` toggles one,
+`u` files a closed-but-unfiled ticket into an area, `o` opens the note in
+Obsidian, `r` reindexes. `R` fetches from Jira, `s` starts a status transition,
+`c` adds a comment, `p` tracks pomodoro time against the selected ticket and
+`w` writes that time to its work log.
+
+**Settings** (`,`) covers timezone, vault path, calendar output and interval,
+and whether tracked time is also sent to Jira (off by default). Timezone
+defaults to your system zone and drives every date boundary.
+
+### Calendar export
+
+```bash
+taskii ics -vault /path/to/vault -out /path/to/vault/Calendar/taskii.ics
+```
+
+Writes an `.ics` file, and only when something actually changed — safe to run
+on a timer next to a syncing vault. The TUI also exports periodically in the
+background. Point [Full Calendar Remastered](https://github.com/obsidian-full-calendar-remastered/plugin-full-calendar)
+or [ICS Calendar Viewer](https://community.obsidian.md/plugins/ics-calendar-viewer)
+at the file to see it inside Obsidian.
+
 ## Install
 
 **Homebrew** (macOS/Linux):

@@ -706,3 +706,65 @@ height.
 Verified by sweep over 4 layouts x 6 themes x widths 70-200 x heights 24-50:
 `BAD_WIDTH=0 BAD_HEIGHT=0 GAP=0 INLINE=0` (INLINE asserts the key never shares
 a line with a weekday row).
+
+---
+
+## Obsidian PARA integration (fork)
+
+This fork adds vault-backed views on top of the existing dashboard. The
+dashboard is untouched and still works with no vault present.
+
+### Why reads bypass the Obsidian CLI
+
+The official Obsidian CLI can run any plugin command by ID, which is the only
+way to reach plugin logic such as a Jira workflow transition. But it costs a
+process spawn plus IPC per call and needs the desktop app running — and it
+LAUNCHES the app when it is not. So:
+
+- **Reads** parse vault markdown directly (`internal/para`). Keystroke-latency,
+  and the whole read path keeps working with Obsidian closed.
+- **Writes that must go through plugin logic** use the CLI (`internal/obsidian`).
+- **Writes that are just text** edit the markdown directly (`internal/vault`).
+
+The `ics` subcommand never touches the CLI: it is meant for a timer, and
+launching a GUI from a timer on a locked session is unacceptable.
+
+### Decisions worth remembering
+
+- **Data directory.** Storage used to resolve `data/tasks.json` against the
+  process CWD. Launching from elsewhere silently started an empty list, and
+  launching inside a synced vault committed private state. Now XDG, with a
+  one-shot read fallback so existing installs keep their tasks.
+- **Frontmatter is parsed as raw text**, not decoded into `map[string]any`.
+  YAML implicit typing claims a bare `duedate: 2026-08-25` as midnight UTC,
+  discarding the fact that no zone was written; re-anchoring afterwards shifts
+  the day for users west of Greenwich. Dates are anchored in the configured
+  zone instead. A test pins this.
+- **Timezone is a setting**, defaulting to the system zone. `App.now` returns
+  time in that zone so no call site reaches for `time.Local`.
+- **The calendar renders deterministically.** It is written into a watched,
+  auto-committed vault, so output that varies per run produces endless no-op
+  commits and cross-machine conflicts. Events are sorted, DTSTAMP comes from
+  the source note rather than the clock, and `WriteIfChanged` skips identical
+  content. Due dates are `VALUE=DATE`; timed entries are UTC instants, which
+  avoids hand-rolling the DST rules a VTIMEZONE block would need.
+- **Vault writes are line-scoped and refuse stale edits.** Obsidian, its
+  plugins and a sync watcher all hold these notes; a whole-file rewrite would
+  lose concurrent edits. A checkbox toggle rewrites one line and refuses when
+  that line no longer holds the task the caller read — ticket notes get renamed
+  from their properties on a debounce, so an index entry can already be stale.
+- **Status is never written to frontmatter.** Doing so renames the file, trips
+  the archive automation and pushes the result while Jira still holds the old
+  value. Transitions go through the plugin command.
+- **Tracked time is local by default.** It accrues in taskii's own data
+  directory, outside any vault, and flushes to the note's freeform work-log
+  section. Sending it to Jira is opt-in (`worklog_push_to_jira`), and the local
+  write always happens first so the user's record survives a failed API call.
+- **Views, not more panes.** Adding a tree, ticket list, detail pane and
+  calendar to the existing four-pane grid would fit no terminal. A `view` layer
+  sits above panes, switched with `1`/`2`/`3`, and each view composes its own
+  panes with its own width breakpoints.
+- **The Unfiled row.** A ticket only leaves `Tickets/` when it is closed AND has
+  an area set, so a closed ticket with no area is stranded and invisible
+  everywhere else. The row appears only when it has contents, so it does not
+  train the eye to ignore it.

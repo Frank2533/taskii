@@ -410,3 +410,19 @@ func renderPomodoro(p pomodoro, width, height int) string {
 
 	return strings.Join(append(lines, keys), "\n")
 }
+
+// toggle starts or pauses the timer.
+func (p *pomodoro) toggle() { p.running = !p.running }
+
+// workElapsed is how far into the current work phase the timer has run. It is
+// zero during breaks, so break time is never credited as work.
+func (p pomodoro) workElapsed() time.Duration {
+	if p.phase != phaseWork {
+		return 0
+	}
+	elapsed := p.phaseDuration() - p.remaining
+	if elapsed < 0 {
+		return 0
+	}
+	return elapsed
+}

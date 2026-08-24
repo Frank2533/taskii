@@ -2,6 +2,7 @@ package ui
 
 import (
 	"fmt"
+	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
@@ -13,7 +14,10 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"taskii/internal/model"
+	"taskii/internal/obsidian"
+	"taskii/internal/para"
 	"taskii/internal/stats"
+	"taskii/internal/worklog"
 )
 
 type focusedPane int
@@ -35,6 +39,9 @@ const (
 	modeConfirmDelete
 	modeNoteEditing
 	modeConfirmClearNotes
+	// modeVaultAdding reuses the task input to append a checkbox to a note in
+	// the vault rather than creating a local task.
+	modeVaultAdding
 )
 
 const dateFormat = "2006-01-02"
@@ -87,6 +94,57 @@ type App struct {
 
 	username string
 	layout   layout
+
+	// --- vault-backed views ---
+
+	// view is the active screen. Panes are composed per view; see paraview.go.
+	view view
+
+	// vaultPath is the indexed vault, "" when none is configured. The app
+	// still runs: the dashboard needs no vault at all.
+	vaultPath string
+
+	// loc governs every date boundary in the app. Set from settings at
+	// startup and never nil, so no date math has to reach for time.Local.
+	loc *time.Location
+
+	// obs drives the Obsidian CLI. Non-nil even when the CLI is missing, so
+	// actions can explain themselves instead of silently doing nothing.
+	obs *obsidian.Client
+
+	idx    *para.Index
+	idxErr error
+
+	// vault holds the PARA view's selection and scroll state.
+	vault vaultState
+
+	// wl accrues pomodoro time against issue keys, locally.
+	wl *worklog.Log
+
+	// pomoKey is the ticket the running timer is credited to, "" when the
+	// timer is not bound to anything.
+	pomoKey string
+
+	// pomoCounted is how much of the current work phase has already been
+	// banked, so each tick credits only the delta.
+	pomoCounted time.Duration
+
+	icsOut   string
+	icsEvery time.Duration
+
+	// busy names the in-flight CLI action, "" when idle.
+	busy string
+
+	settingsUI settingsState
+
+	// Raw persisted setting values, kept verbatim so an empty string keeps
+	// meaning "derive this" rather than being frozen into whatever was
+	// derived at startup.
+	tzSetting          string
+	vaultSetting       string
+	icsSetting         string
+	icsIntervalSetting string
+	worklogPush        bool
 }
 
 // Options configures NewApp for non-default startup modes.
@@ -121,14 +179,27 @@ func NewApp(opts Options) App {
 		}
 	}
 
+	settings, _ := model.LoadSettings()
 	lay := layoutTasksLeft
 	if !opts.Mock {
-		settings, _ := model.LoadSettings()
 		if settings.Theme != "" {
 			setThemeByName(settings.Theme)
 		}
 		if settings.Layout != "" {
 			lay = layoutByName(settings.Layout)
+		}
+	}
+
+	loc := opts.Location
+	if loc == nil {
+		loc = settings.Location()
+	}
+
+	// Tracked time is a local record, so a mock run must not touch it.
+	wl := &worklog.Log{Entries: map[string]*worklog.Entry{}}
+	if !opts.Mock {
+		if loaded, err := worklog.Load(); err == nil {
+			wl = loaded
 		}
 	}
 
@@ -153,9 +224,17 @@ func NewApp(opts Options) App {
 	// cleared and handled in updateNoteEditing instead.
 	ta.KeyMap.InsertNewline.SetEnabled(false)
 
+	icsOut := settings.ICSOutput
+	if icsOut == "" && opts.Vault != "" {
+		icsOut = filepath.Join(opts.Vault, "Calendar", "taskii.ics")
+	}
+
 	return App{
-		tasks:         tasks,
-		now:           time.Now,
+		tasks: tasks,
+		// Every date the app shows is derived from this, so the configured
+		// zone applies uniformly instead of each call site reaching for
+		// time.Local.
+		now:           func() time.Time { return time.Now().In(loc) },
 		focus:         focusToday,
 		mode:          modeNormal,
 		input:         ti,
@@ -168,11 +247,37 @@ func NewApp(opts Options) App {
 		noPersist:     opts.Mock,
 		username:      currentUsername(),
 		layout:        lay,
+
+		view:      viewDashboard,
+		vaultPath: opts.Vault,
+		loc:       loc,
+		obs:       obsidian.New(opts.Vault),
+		wl:        wl,
+
+		tzSetting:          settings.Timezone,
+		vaultSetting:       settings.VaultPath,
+		icsSetting:         settings.ICSOutput,
+		icsIntervalSetting: settings.ICSInterval,
+		worklogPush:        settings.WorklogPushToJira,
+
+		icsOut:   icsOut,
+		icsEvery: settings.ICSEvery(),
 	}
 }
 
 func (a App) Init() tea.Cmd {
-	return pomodoroTick()
+	cmds := []tea.Cmd{pomodoroTick()}
+	// The vault is indexed off the UI goroutine so a large vault never delays
+	// the first paint.
+	if c := loadIndex(a.vaultPath, a.loc); c != nil {
+		cmds = append(cmds, c)
+	}
+	if !a.noPersist {
+		if c := icsTick(a.icsEvery); c != nil {
+			cmds = append(cmds, c)
+		}
+	}
+	return tea.Batch(cmds...)
 }
 
 func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
@@ -183,13 +288,50 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case pomodoroTickMsg:
-		if a.pomo.tick() {
+		phaseChanged := a.pomo.tick()
+		a.creditPomodoro()
+		if phaseChanged {
 			return a, tea.Batch(pomodoroTick(), notifyPhaseChange(a.pomo.phase))
 		}
 		return a, pomodoroTick()
 
+	case indexMsg:
+		a.idx, a.idxErr = msg.idx, msg.err
+		a.clampVaultSelections()
+		return a, nil
+
+	case actionMsg:
+		a.busy = ""
+		if msg.err != nil {
+			a.err = msg.label + ": " + msg.err.Error()
+			return a, nil
+		}
+		a.status = msg.label + " done"
+		// A plugin command may have rewritten the note, so re-read the vault
+		// rather than trusting the index we already hold.
+		return a, loadIndex(a.vaultPath, a.loc)
+
+	case icsMsg:
+		if msg.err != nil {
+			a.err = "calendar export: " + msg.err.Error()
+		} else if msg.wrote {
+			a.status = fmt.Sprintf("calendar: %d events written", msg.count)
+		}
+		return a, nil
+
+	case icsTickMsg:
+		return a, tea.Batch(
+			exportICS(a.vaultPath, a.icsOut, a.tasks, a.loc),
+			icsTick(a.icsEvery),
+		)
+
 	case tea.KeyMsg:
+		if a.settingsUI.open {
+			return a.updateSettings(msg)
+		}
 		switch a.mode {
+		case modeVaultAdding:
+			return a.updateVaultAdding(msg)
 		case modeAdding:
 			return a.updateAdding(msg)
 		case modeConfirmDelete:
@@ -199,10 +341,85 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case modeConfirmClearNotes:
 			return a.updateConfirmClearNotes(msg)
 		}
+		// View switching and settings are app-wide, but --simple is a
+		// deliberately single-screen mode with no other views to reach.
+		if !a.simple {
+			switch msg.String() {
+			case "1":
+				a.view = viewDashboard
+				return a, nil
+			case "2":
+				a.view = viewPARA
+				return a, nil
+			case "3":
+				a.view = viewCalendar
+				return a, nil
+			case ",":
+				a.settingsUI.open = true
+				a.settingsUI.err = ""
+				return a, nil
+			case "q", "ctrl+c":
+				return a, tea.Quit
+			}
+			switch a.view {
+			case viewPARA:
+				return a.updatePara(msg)
+			case viewCalendar:
+				return a.updateCalendar(msg)
+			}
+		}
 		return a.updateNormal(msg)
 	}
 
 	return a, nil
+}
+
+// updateCalendar is the calendar view's key map. It is intentionally small:
+// the calendar is a read-only projection of the vault and local tasks.
+func (a App) updateCalendar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "r":
+		return a, loadIndex(a.vaultPath, a.loc)
+	case "C":
+		return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.loc)
+	}
+	return a, nil
+}
+
+// updateVaultAdding handles the quick-add input for a note checkbox.
+func (a App) updateVaultAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		a.mode = modeNormal
+		a.input.Blur()
+		a.input.SetValue("")
+		return a, nil
+	case "enter":
+		return a.commitQuickAdd(a.input.Value())
+	}
+	var cmd tea.Cmd
+	a.input, cmd = a.input.Update(msg)
+	return a, cmd
+}
+
+// clampVaultSelections keeps the PARA view's cursors inside the freshly
+// rebuilt index.
+func (a *App) clampVaultSelections() {
+	if rows := a.treeRows(); len(rows) > 0 {
+		a.vault.treeSel = clamp(a.vault.treeSel, 0, len(rows)-1)
+	} else {
+		a.vault.treeSel = 0
+	}
+	if list := a.visibleTickets(); len(list) > 0 {
+		a.vault.listSel = clamp(a.vault.listSel, 0, len(list)-1)
+	} else {
+		a.vault.listSel = 0
+	}
+	if t, ok := a.selectedTicket(); ok && len(t.Checkboxes) > 0 {
+		a.vault.detailSel = clamp(a.vault.detailSel, 0, len(t.Checkboxes)-1)
+	} else {
+		a.vault.detailSel = 0
+	}
 }
 
 // expandedAllowedKeys are the only bindings that stay live while the Notes
@@ -1097,10 +1314,7 @@ func (a App) saveSettings() {
 	if a.noPersist {
 		return
 	}
-	_ = model.SaveSettings(model.Settings{
-		Theme:  currentTheme().Name,
-		Layout: a.layout.String(),
-	})
+	_ = model.SaveSettings(a.settings())
 }
 
 // selectedTask returns the task under the cursor in the focused pane, or nil
@@ -1303,6 +1517,34 @@ func (a App) helpGroups() []helpGroup {
 		}
 	}
 
+	if a.settingsUI.open {
+		if a.settingsUI.editing {
+			return []helpGroup{{"", []helpKey{{"enter", "save"}, {"esc", "cancel"}}}}
+		}
+		return []helpGroup{{"", []helpKey{
+			{"↑/↓ j/k", "field"}, {"enter", "edit/cycle"}, {"esc", "close"},
+		}}}
+	}
+
+	switch a.view {
+	case viewPARA:
+		if a.mode == modeVaultAdding {
+			return []helpGroup{{"", []helpKey{{"enter", "add"}, {"esc", "cancel"}}}}
+		}
+		return []helpGroup{
+			{"View", []helpKey{{"1/2/3", "dash/para/cal"}, {",", "settings"}}},
+			{"Move", []helpKey{{"tab", "pane"}, {"↑/↓ j/k", "select"}, {"enter", "toggle"}}},
+			{"Vault", []helpKey{{"a", "add task"}, {"u", "set area"}, {"o", "open"}, {"r", "reindex"}}},
+			{"Jira", []helpKey{{"R", "fetch"}, {"s", "status"}, {"c", "comment"}, {"w", "log time"}}},
+			{"", []helpKey{{"p", "track time"}, {"C", "export .ics"}, {"q", "quit"}}},
+		}
+	case viewCalendar:
+		return []helpGroup{
+			{"View", []helpKey{{"1/2/3", "dash/para/cal"}, {",", "settings"}}},
+			{"Calendar", []helpKey{{"r", "reindex"}, {"C", "export .ics"}, {"q", "quit"}}},
+		}
+	}
+
 	// While a confirmation is up the help bar is emptied rather than
 	// duplicated: the prompt on the status line already carries its own
 	// [y]/[any other key] hint, and every other binding is inert until the
@@ -1468,6 +1710,20 @@ func (a App) View() string {
 
 	if a.simple {
 		return a.assemblePage(a.renderSimple(), helpLine)
+	}
+
+	// Settings replace the body rather than floating over it: a true overlay
+	// would have to composite against whichever view is behind it, and every
+	// pane here is already a fixed-size block.
+	if a.settingsUI.open {
+		return a.assemblePage(a.renderSettings(), helpLine)
+	}
+
+	switch a.view {
+	case viewPARA:
+		return a.assemblePage(a.renderPara(), helpLine)
+	case viewCalendar:
+		return a.assemblePage(a.renderCalendar(), helpLine)
 	}
 
 	g := a.geometry()

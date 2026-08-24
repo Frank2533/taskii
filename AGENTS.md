@@ -768,3 +768,33 @@ launching a GUI from a timer on a locked session is unacceptable.
   an area set, so a closed ticket with no area is stranded and invisible
   everywhere else. The row appears only when it has contents, so it does not
   train the eye to ignore it.
+
+### Phase 0 spike result (verified against a live vault)
+
+All ten jira-sync commands are registered in `app.commands.commands`, and the
+IDs hardcoded in `internal/obsidian/jira.go` match exactly.
+
+But `app.commands.listCommands()` — which the CLI's `commands` subcommand
+mirrors — returned only `rebuild-issue-cache`, the single command registered
+with a plain `callback`. The other nine use `checkCallback`, and every one of
+them returned `false`, even with a ticket note active.
+
+The cause was not the CLI. jira-sync's `currentConnectionIndex` pointed at a
+second connection whose `jiraUrl` was empty. Temporarily pointing it at the
+configured connection flipped eight of the nine to `true`, so the plugin tests
+the active connection before anything else and one unset URL disables the whole
+command set at once — silently, because a blocked command simply disappears
+from the palette rather than reporting why.
+
+The ninth, `update-work-log-jira-batch`, stays `false` until the note carries a
+`jira_worklog_batch` property. That is correct, and it is the order the worklog
+flush already uses: write the property, then run the command.
+
+Two consequences for the code:
+
+- `Client.Check` runs a command's own `checkCallback(true)` before dispatching,
+  so the UI can distinguish "plugin missing" from "not right now" instead of
+  reporting a silent no-op. `checkCallback(true)` performs the check without
+  executing.
+- Listing commands is not a reliable way to discover what exists. Query
+  `app.commands.commands` for existence and `checkCallback` for availability.

@@ -3,13 +3,12 @@ package model
 import (
 	"encoding/json"
 	"os"
-	"path/filepath"
 )
 
-const dataPath = "data/tasks.json"
+const tasksFile = "tasks.json"
 
 func Load() ([]Task, error) {
-	b, err := os.ReadFile(dataPath)
+	b, err := readData(tasksFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return []Task{}, nil
@@ -27,12 +26,9 @@ func Load() ([]Task, error) {
 }
 
 func Save(tasks []Task) error {
-	if err := os.MkdirAll(filepath.Dir(dataPath), 0o755); err != nil {
-		return err
-	}
 	b, err := json.MarshalIndent(tasks, "", "  ")
 	if err != nil {
 		return err
 	}
-	return os.WriteFile(dataPath, b, 0o644)
+	return writeData(tasksFile, b)
 }

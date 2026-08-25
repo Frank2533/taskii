@@ -270,6 +270,18 @@ func (a App) updateEditEvent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.err = "an event needs a time range, e.g. 09:30-10:00"
 			return a, nil
 		}
+		original, ok := a.eventByID(id)
+		if !ok {
+			a.err = "that event no longer exists"
+			return a, nil
+		}
+		if original.Repeat != model.RepeatNone {
+			// Which occurrences a change reaches is genuinely ambiguous for a
+			// repeat, and guessing rewrites a series that cannot easily be
+			// restored.
+			_, spec := deadline.Parse(text, a.now())
+			return a.beginScopePrompt(scopeEdit, original, a.scopeOccurrence(original), parsed, spec.HasDue)
+		}
 		for i := range a.events {
 			if a.events[i].ID != id {
 				continue
@@ -293,12 +305,24 @@ func (a App) updateEditEvent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	return a, cmd
 }
 
+// scopeOccurrence is the occurrence a change was made from: the entry under
+// the cursor, falling back to the series start when the cursor is elsewhere.
+func (a App) scopeOccurrence(ev model.Event) time.Time {
+	if e, ok := a.selectedEntry(); ok && e.eventID == ev.ID {
+		return e.at
+	}
+	return ev.Start
+}
+
 // deleteSelectedEvent removes the event under the cursor.
 func (a App) deleteSelectedEvent() (tea.Model, tea.Cmd) {
 	ev, ok := a.selectedEvent()
 	if !ok {
 		a.err = "no event selected"
 		return a, nil
+	}
+	if ev.Repeat != model.RepeatNone {
+		return a.beginScopePrompt(scopeDelete, ev, a.scopeOccurrence(ev), model.Event{}, false)
 	}
 	out := a.events[:0:0]
 	for _, e := range a.events {

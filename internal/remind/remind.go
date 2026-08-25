@@ -116,14 +116,16 @@ func key(e model.Event, occurrence time.Time, lead time.Duration) string {
 	return fmt.Sprintf("%s|%s|%dm", e.ID, occurrence.UTC().Format(time.RFC3339), int(lead/time.Minute))
 }
 
-// Pending returns the reminders to deliver now, marking everything it considers so
-// nothing fires twice.
+// Pending returns the reminders to deliver now, and those that were due but
+// are too late to be worth sending.
 //
-// It mutates fired, including for reminders it decides are too late to send:
-// leaving those unmarked would deliver them at the next sweep instead.
-func Pending(events []model.Event, now time.Time, fired *Fired) []Due {
+// Both are marked as fired: leaving the late ones unmarked would deliver them
+// at the next sweep instead. They are still returned so the caller can record
+// why a notification never arrived — otherwise a skipped reminder is
+// indistinguishable from a broken one.
+func Pending(events []model.Event, now time.Time, fired *Fired) (due, late []Due) {
 	if len(events) == 0 {
-		return nil
+		return nil, nil
 	}
 	maxLead := time.Duration(0)
 	for _, l := range Leads {
@@ -136,7 +138,6 @@ func Pending(events []model.Event, now time.Time, fired *Fired) []Due {
 	from := now.Add(-maxLead)
 	to := now.Add(maxLead + time.Minute)
 
-	var out []Due
 	for _, o := range model.EventsOccurring(events, from, to) {
 		for _, lead := range Leads {
 			at := o.Start.Add(-lead)
@@ -145,15 +146,17 @@ func Pending(events []model.Event, now time.Time, fired *Fired) []Due {
 				continue
 			}
 			fired.mark(k, o.Start)
+			d := Due{Key: k, Title: o.Event.Title, Lead: lead, EventStart: o.Start}
 			if now.Sub(at) > grace {
+				late = append(late, d)
 				continue
 			}
-			out = append(out, Due{
-				Key: k, Title: o.Event.Title, Lead: lead, EventStart: o.Start,
-			})
+			due = append(due, d)
 		}
 	}
-	sort.Slice(out, func(i, j int) bool { return out[i].Lead > out[j].Lead })
+	byLead := func(s []Due) { sort.Slice(s, func(i, j int) bool { return s[i].Lead > s[j].Lead }) }
+	byLead(due)
+	byLead(late)
 	fired.Prune(now)
-	return out
+	return due, late
 }

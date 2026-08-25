@@ -72,12 +72,14 @@ func (a App) keyReference() []keySection {
 				{"T", "jump to today"},
 				{"tab", "step through the day's entries"},
 				{"a / e / d", "add, edit or delete an event"},
+				{"", "editing a repeat asks: this / this and future / all"},
 				{"r", "reindex the vault"},
 				{"C", "export the calendar now"},
 			}},
 			{"Reminders", []keyRow{
 				{"automatic", "15, 5 and 1 minutes before every event"},
 				{",", "settings: enable phone push and set an ntfy topic"},
+				{"", "history: run  taskii notifications"},
 			}},
 			{"Event syntax", []keyRow{
 				{"09:30-10:00", "start and end (required)"},

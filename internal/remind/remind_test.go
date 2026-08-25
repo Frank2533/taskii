@@ -22,7 +22,7 @@ func TestEachLeadFiresOnceAtItsTime(t *testing.T) {
 
 	for _, lead := range Leads {
 		now := start.Add(-lead)
-		got := Pending([]model.Event{e}, now, fired)
+		got, _ := Pending([]model.Event{e}, now, fired)
 		if len(got) != 1 {
 			t.Fatalf("at -%v got %d reminders, want 1", lead, len(got))
 		}
@@ -30,7 +30,7 @@ func TestEachLeadFiresOnceAtItsTime(t *testing.T) {
 			t.Errorf("lead = %v, want %v", got[0].Lead, lead)
 		}
 		// A second sweep a moment later must not repeat it.
-		if again := Pending([]model.Event{e}, now.Add(30*time.Second), fired); len(again) != 0 {
+		if again, _ := Pending([]model.Event{e}, now.Add(30*time.Second), fired); len(again) != 0 {
 			t.Errorf("reminder repeated: %+v", again)
 		}
 	}
@@ -58,12 +58,16 @@ func TestLateRemindersAreSkippedNotQueued(t *testing.T) {
 
 	// The app was closed and opens three minutes before the event: the 15 and
 	// 5 minute reminders are long past.
-	got := Pending([]model.Event{e}, start.Add(-3*time.Minute), fired)
+	got, late := Pending([]model.Event{e}, start.Add(-3*time.Minute), fired)
 	if len(got) != 0 {
 		t.Fatalf("delivered stale reminders: %+v", got)
 	}
+	// They must still be reported, so the reason nothing arrived is knowable.
+	if len(late) != 2 {
+		t.Errorf("late = %d, want the 15 and 5 minute reminders reported", len(late))
+	}
 	// The 1-minute reminder is still ahead and must still fire.
-	got = Pending([]model.Event{e}, start.Add(-1*time.Minute), fired)
+	got, _ = Pending([]model.Event{e}, start.Add(-1*time.Minute), fired)
 	if len(got) != 1 || got[0].Lead != time.Minute {
 		t.Errorf("the 1-minute reminder did not fire: %+v", got)
 	}
@@ -75,11 +79,11 @@ func TestNextOccurrenceRemindsAgain(t *testing.T) {
 	e := standup(start)
 	fired := NewFired()
 
-	if got := Pending([]model.Event{e}, start.Add(-time.Minute), fired); len(got) != 1 {
+	if got, _ := Pending([]model.Event{e}, start.Add(-time.Minute), fired); len(got) != 1 {
 		t.Fatalf("first occurrence did not remind: %+v", got)
 	}
 	tomorrow := start.AddDate(0, 0, 1) // Thursday, a weekday
-	if got := Pending([]model.Event{e}, tomorrow.Add(-time.Minute), fired); len(got) != 1 {
+	if got, _ := Pending([]model.Event{e}, tomorrow.Add(-time.Minute), fired); len(got) != 1 {
 		t.Errorf("next occurrence did not remind: %+v", got)
 	}
 }
@@ -87,7 +91,7 @@ func TestNextOccurrenceRemindsAgain(t *testing.T) {
 func TestPruneDropsOldMarkers(t *testing.T) {
 	start := time.Date(2026, 8, 26, 9, 30, 0, 0, time.UTC)
 	fired := NewFired()
-	Pending([]model.Event{standup(start)}, start.Add(-time.Minute), fired)
+	_, _ = Pending([]model.Event{standup(start)}, start.Add(-time.Minute), fired)
 	if len(fired.Keys) == 0 {
 		t.Fatal("nothing was recorded")
 	}
@@ -101,7 +105,7 @@ func TestFiredStoreRoundTrips(t *testing.T) {
 	dir := t.TempDir()
 	start := time.Date(2026, 8, 26, 9, 30, 0, 0, time.UTC)
 	fired := NewFired()
-	Pending([]model.Event{standup(start)}, start.Add(-time.Minute), fired)
+	_, _ = Pending([]model.Event{standup(start)}, start.Add(-time.Minute), fired)
 	if err := fired.Save(dir); err != nil {
 		t.Fatal(err)
 	}
@@ -111,7 +115,7 @@ func TestFiredStoreRoundTrips(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if got := Pending([]model.Event{standup(start)}, start.Add(-50*time.Second), reloaded); len(got) != 0 {
+	if got, _ := Pending([]model.Event{standup(start)}, start.Add(-50*time.Second), reloaded); len(got) != 0 {
 		t.Errorf("restart replayed a fired reminder: %+v", got)
 	}
 }

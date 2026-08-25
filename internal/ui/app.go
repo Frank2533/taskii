@@ -178,6 +178,10 @@ type App struct {
 	// editingEvent is the id of the event being edited.
 	editingEvent string
 
+	// scope is a pending change to a recurring event, waiting on the user to
+	// say how much of the series it applies to.
+	scope pendingScope
+
 	// editing is what an in-progress edit applies to.
 	editing editTarget
 
@@ -426,6 +430,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		if a.picker.open {
 			return a.updateDeadlinePicker(msg)
+		}
+		if a.scope.open {
+			return a.updateScopePrompt(msg)
 		}
 		if a.showKeys {
 			// Any key dismisses the reference, so it never traps the user.
@@ -2081,6 +2088,9 @@ func (a App) View() string {
 	}
 	if a.picker.open {
 		return a.assemblePage(a.renderDeadlinePicker(), helpLine)
+	}
+	if a.scope.open {
+		return a.assemblePage(a.renderScopePrompt(), helpLine)
 	}
 	if a.showKeys {
 		return a.assemblePage(a.renderKeyHelp(), helpLine)

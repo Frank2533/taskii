@@ -894,3 +894,34 @@ expected order and the one the worklog flush already follows.
   as events, so entry zero is whatever sorts first rather than necessarily an
   event; `tab` steps through them. A selected entry is kept on screen when a
   cell overflows, since it is the one about to be edited.
+
+### Changing one occurrence of a repeat
+
+- **Editing or deleting a repeat asks first.** "Move the standup to ten" could
+  mean tomorrow's, every one from now on, or the whole series, and guessing
+  rewrites something the user cannot easily restore. A one-off does not ask,
+  because there is nothing to ask about.
+- **"This occurrence" excludes rather than rewrites.** The occurrence is added
+  to the series' exclusion list and, for an edit, re-added as a one-off, so the
+  series itself is never touched. Exclusions export as EXDATE, so a subscriber
+  drops exactly the ones that changed instead of showing them twice.
+- **"This and future" splits.** The original is bounded just before the
+  occurrence and a new series takes over, which keeps every past occurrence
+  exactly as it was. When nothing precedes the occurrence there is no split to
+  make and it behaves as "all".
+- **A split is re-anchored to the occurrence** unless the edit named a date.
+  The parser defaults an unstated date to today, which for "this and future"
+  would drag the change back over occurrences it was never meant to touch — a
+  test pins this.
+- **Exclusions match to the minute.** A stored exception and a computed
+  occurrence can differ in sub-second detail after a JSON round trip, and an
+  exception that silently stopped matching would resurrect an occurrence the
+  user had already changed.
+
+### The notification log
+
+`taskii notifications` prints what was delivered. Without it a notification
+that never arrived leaves nothing behind: the phone shows nothing either way,
+and whether it was skipped, refused or never attempted is exactly the question.
+Skipped reminders are logged with the reason, and the ntfy topic is never
+written to the log, which is meant to be pasted when something is wrong.

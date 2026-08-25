@@ -241,6 +241,11 @@ func TestEditEventUpdatesInPlace(t *testing.T) {
 
 	a.input.SetValue("standup 10:00-10:15 weekdays")
 	a = press(t, a, "enter")
+	// It repeats, so the scope has to be answered before anything changes.
+	if !a.scope.open {
+		t.Fatal("no scope prompt for a repeating event")
+	}
+	a = press(t, a, "a") // the whole series
 	if a.err != "" {
 		t.Fatalf("edit reported: %s", a.err)
 	}
@@ -263,6 +268,9 @@ func TestEditRefusesToDropTheTimeRange(t *testing.T) {
 	a.input.SetValue("standup weekdays")
 	a = press(t, a, "enter")
 
+	if a.scope.open {
+		t.Fatal("a rejected input reached the scope prompt")
+	}
 	if a.err == "" {
 		t.Error("expected a complaint about the missing time range")
 	}
@@ -292,6 +300,10 @@ func TestEditSaysSoWhenTheCursorIsNotOnAnEvent(t *testing.T) {
 func TestDeleteRemovesTheSelectedEvent(t *testing.T) {
 	a := calendarWithEvent(t, "standup 09:30-09:45 weekdays")
 	a = press(t, a, "d")
+	if !a.scope.open {
+		t.Fatal("no scope prompt for a repeating event")
+	}
+	a = press(t, a, "a") // the whole series
 	if a.err != "" {
 		t.Fatalf("delete reported: %s", a.err)
 	}
@@ -331,5 +343,146 @@ func TestTabStepsThroughADaysEntries(t *testing.T) {
 		// After a full cycle the selection is back where it started, which
 		// was the event.
 		t.Error("a full cycle did not return to the starting entry")
+	}
+}
+
+// A one-off event has no ambiguity, so it must not ask.
+func TestNonRepeatingEventEditsWithoutAsking(t *testing.T) {
+	a := calendarWithEvent(t, "lunch 12:00-13:00")
+	a = press(t, a, "e")
+	a.input.SetValue("lunch 12:30-13:30")
+	a = press(t, a, "enter")
+
+	if a.scope.open {
+		t.Fatal("asked about scope for a one-off event")
+	}
+	if a.events[0].Start.Format("15:04") != "12:30" {
+		t.Errorf("start = %s, want 12:30", a.events[0].Start.Format("15:04"))
+	}
+}
+
+// Editing one occurrence must leave the series itself alone.
+func TestEditThisOccurrenceOnlySplitsItOut(t *testing.T) {
+	a := calendarWithEvent(t, "standup 09:30-09:45 weekdays")
+	series := a.events[0]
+	occ := a.scopeOccurrence(series)
+
+	a = press(t, a, "e")
+	a.input.SetValue("standup 11:00-11:30 weekdays")
+	a = press(t, a, "enter")
+	a = press(t, a, "t") // this occurrence only
+
+	if len(a.events) != 2 {
+		t.Fatalf("events = %d, want the series plus a one-off", len(a.events))
+	}
+	var kept, one model.Event
+	for _, e := range a.events {
+		if e.ID == series.ID {
+			kept = e
+		} else {
+			one = e
+		}
+	}
+	if kept.Start.Format("15:04") != "09:30" {
+		t.Errorf("the series moved to %s; it should be untouched", kept.Start.Format("15:04"))
+	}
+	if len(kept.Except) != 1 {
+		t.Errorf("the occurrence was not excluded: %v", kept.Except)
+	}
+	if one.Repeat != model.RepeatNone {
+		t.Errorf("the split-out occurrence still repeats (%q)", one.Repeat)
+	}
+	if one.Start.Format("15:04") != "11:00" {
+		t.Errorf("the split-out occurrence starts %s, want 11:00", one.Start.Format("15:04"))
+	}
+
+	// The excluded day must now show the one-off and not the series.
+	day := startOfDay(occ)
+	occs := model.EventsOccurring(a.events, day, day.AddDate(0, 0, 1))
+	if len(occs) != 1 {
+		t.Fatalf("that day has %d occurrences, want exactly the replacement", len(occs))
+	}
+	if occs[0].Start.Format("15:04") != "11:00" {
+		t.Errorf("that day shows %s, want the replacement", occs[0].Start.Format("15:04"))
+	}
+}
+
+// "This and future" splits the series, leaving earlier occurrences as they were.
+func TestEditFutureSplitsTheSeries(t *testing.T) {
+	a := calendarWithEvent(t, "standup 09:30-09:45 weekdays")
+	series := a.events[0]
+
+	// Move the cursor a week on, so there is a past to preserve.
+	later := series.Start.AddDate(0, 0, 7)
+	a.calCursor = later
+	a.calEntrySel = entryIndexOf(t, a, series.ID)
+
+	a = press(t, a, "e")
+	a.input.SetValue("standup 10:00-10:15 weekdays")
+	a = press(t, a, "enter")
+	a = press(t, a, "f") // this and future
+
+	if len(a.events) != 2 {
+		t.Fatalf("events = %d, want the bounded original plus its successor", len(a.events))
+	}
+	var old, rest model.Event
+	for _, e := range a.events {
+		if e.ID == series.ID {
+			old = e
+		} else {
+			rest = e
+		}
+	}
+	if old.Until == nil {
+		t.Fatal("the original series was not bounded")
+	}
+	if !old.Until.Before(later) {
+		t.Errorf("the original runs to %v, which is not before the split at %v", old.Until, later)
+	}
+	if rest.Start.Format("15:04") != "10:00" {
+		t.Errorf("the new series starts %s, want 10:00", rest.Start.Format("15:04"))
+	}
+
+	// The first occurrence, a week earlier, must still be at the old time.
+	day := startOfDay(series.Start)
+	occs := model.EventsOccurring(a.events, day, day.AddDate(0, 0, 1))
+	if len(occs) != 1 || occs[0].Start.Format("15:04") != "09:30" {
+		t.Errorf("the past was rewritten: %+v", occs)
+	}
+}
+
+// Cancelling one occurrence of a repeat removes only that day.
+func TestDeleteThisOccurrenceOnly(t *testing.T) {
+	a := calendarWithEvent(t, "standup 09:30-09:45 weekdays")
+	series := a.events[0]
+	occ := a.scopeOccurrence(series)
+
+	a = press(t, a, "d")
+	a = press(t, a, "t")
+
+	if len(a.events) != 1 {
+		t.Fatalf("events = %d, want the series kept", len(a.events))
+	}
+	day := startOfDay(occ)
+	if occs := model.EventsOccurring(a.events, day, day.AddDate(0, 0, 1)); len(occs) != 0 {
+		t.Errorf("that day still has %d occurrences", len(occs))
+	}
+	// The next weekday must be unaffected.
+	next := day.AddDate(0, 0, 1)
+	if occs := model.EventsOccurring(a.events, next, next.AddDate(0, 0, 1)); len(occs) == 0 {
+		t.Error("the rest of the series was removed too")
+	}
+}
+
+func TestScopePromptCanBeCancelled(t *testing.T) {
+	a := calendarWithEvent(t, "standup 09:30-09:45 weekdays")
+	a = press(t, a, "d")
+	a = press(t, a, "esc")
+
+	if a.scope.open {
+		t.Error("the prompt stayed open")
+	}
+	if len(a.events) != 1 {
+		t.Errorf("events = %d, want the event untouched", len(a.events))
 	}
 }

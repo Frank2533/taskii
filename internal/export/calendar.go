@@ -65,6 +65,7 @@ func Calendar(name string, idx *para.Index, tasks []model.Task, events []model.E
 			Description: e.Notes,
 			Categories:  categories("Event", ""),
 			RRule:       e.RRule(),
+			ExDate:      e.ExceptDates(),
 			Stamp:       e.Start,
 		})
 	}

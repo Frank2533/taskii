@@ -104,6 +104,11 @@ type Event struct {
 	// Until bounds a repeat. Nil repeats indefinitely.
 	Until *time.Time `json:"until,omitempty"`
 
+	// Except lists occurrence start times removed from the series, which is
+	// how a single occurrence is changed or cancelled without disturbing the
+	// rest of it.
+	Except []time.Time `json:"except,omitempty"`
+
 	// Days restricts a weekly repeat to particular weekdays, which is how a
 	// standup that runs Monday to Friday is expressed. Empty means the repeat
 	// falls on whatever weekday Start does.
@@ -172,6 +177,34 @@ func mondayIndex(d time.Weekday) int { return (int(d) + 6) % 7 }
 // spin forever when asked for an implausible range.
 const maxOccurrences = 2000
 
+// excluded reports whether an occurrence has been removed from the series.
+//
+// Matching is to the minute rather than exact: a stored exception and a
+// computed occurrence can differ in seconds or monotonic detail after a
+// round trip through JSON, and an exception that silently stopped matching
+// would resurrect an occurrence the user had already changed.
+func (e Event) excluded(start time.Time) bool {
+	for _, ex := range e.Except {
+		if ex.UTC().Truncate(time.Minute).Equal(start.UTC().Truncate(time.Minute)) {
+			return true
+		}
+	}
+	return false
+}
+
+// ExceptDates renders the exclusions as an RFC 5545 EXDATE value, empty when
+// there are none.
+func (e Event) ExceptDates() string {
+	if len(e.Except) == 0 {
+		return ""
+	}
+	out := make([]string, 0, len(e.Except))
+	for _, ex := range e.Except {
+		out = append(out, ex.UTC().Format("20060102T150405Z"))
+	}
+	return strings.Join(out, ",")
+}
+
 // Occurrences expands an event into the instances overlapping [from, to).
 func (e Event) Occurrences(from, to time.Time) []Occurrence {
 	if !to.After(from) {
@@ -184,7 +217,7 @@ func (e Event) Occurrences(from, to time.Time) []Occurrence {
 		if end.IsZero() {
 			end = e.Start.Add(dur)
 		}
-		if e.Start.Before(to) && end.After(from) {
+		if e.Start.Before(to) && end.After(from) && !e.excluded(e.Start) {
 			return []Occurrence{{Event: e, Start: e.Start, End: end}}
 		}
 		return nil
@@ -202,6 +235,9 @@ func (e Event) Occurrences(from, to time.Time) []Occurrence {
 		}
 		if e.Until != nil && start.After(*e.Until) {
 			break
+		}
+		if e.excluded(start) {
+			continue
 		}
 		end := start.Add(dur)
 		if end.After(from) {
@@ -245,7 +281,7 @@ func (e Event) weeklyByDay(from, to time.Time, dur time.Duration) []Occurrence {
 			if e.Until != nil && start.After(*e.Until) {
 				return out
 			}
-			if !start.Before(to) {
+			if !start.Before(to) || e.excluded(start) {
 				continue
 			}
 			if end := start.Add(dur); end.After(from) {

@@ -53,6 +53,11 @@ type Event struct {
 	// intact instead of receiving hundreds of unrelated entries.
 	RRule string
 
+	// ExDate lists occurrences removed from a recurring series, so a
+	// subscriber drops exactly the ones that were changed or cancelled
+	// instead of showing them twice.
+	ExDate string
+
 	// Stamp is DTSTAMP. Callers should pass something derived from the source
 	// note (its updated time), never the current clock, or every export
 	// rewrites the file.
@@ -132,6 +137,9 @@ func (c *Calendar) Render() []byte {
 		}
 		if e.RRule != "" {
 			line("RRULE:" + e.RRule)
+		}
+		if e.ExDate != "" {
+			line("EXDATE:" + e.ExDate)
 		}
 		line("SUMMARY:" + escape(e.Summary))
 		if e.Description != "" {

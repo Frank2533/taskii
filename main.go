@@ -12,6 +12,7 @@ import (
 	"taskii/internal/export"
 	"taskii/internal/ics"
 	"taskii/internal/model"
+	"taskii/internal/notify"
 	"taskii/internal/obsidian"
 	"taskii/internal/para"
 	"taskii/internal/ui"
@@ -22,6 +23,13 @@ func main() {
 	// its own flags.
 	if len(os.Args) > 1 && os.Args[1] == "ics" {
 		if err := runICS(os.Args[2:]); err != nil {
+			fmt.Fprintln(os.Stderr, "error:", err)
+			os.Exit(1)
+		}
+		return
+	}
+	if len(os.Args) > 1 && os.Args[1] == "notifications" {
+		if err := runNotifications(os.Args[2:]); err != nil {
 			fmt.Fprintln(os.Stderr, "error:", err)
 			os.Exit(1)
 		}
@@ -128,6 +136,36 @@ func runICS(args []string) error {
 		fmt.Printf("wrote %d events to %s\n", len(cal.Events), target)
 	} else if !*quiet {
 		fmt.Printf("%s already up to date (%d events)\n", target, len(cal.Events))
+	}
+	return nil
+}
+
+// runNotifications prints the delivery log.
+//
+// Without it, a notification that never arrived leaves nothing behind to look
+// at: the phone shows nothing either way, and whether it was skipped, refused
+// or never attempted is exactly the question being asked.
+func runNotifications(args []string) error {
+	fs := flag.NewFlagSet("notifications", flag.ExitOnError)
+	n := fs.Int("n", 20, "how many of the most recent entries to show; 0 for all")
+	dataDir := fs.String("data-dir", "", "where taskii stores its own JSON")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+	if *dataDir != "" {
+		model.SetDataDir(*dataDir)
+	}
+
+	entries, err := notify.ReadLog(model.DataDir(), *n)
+	if err != nil {
+		return err
+	}
+	if len(entries) == 0 {
+		fmt.Println("No notifications have been recorded yet.")
+		return nil
+	}
+	for _, e := range entries {
+		fmt.Println(e.Line())
 	}
 	return nil
 }

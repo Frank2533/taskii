@@ -85,12 +85,35 @@ func (a App) announce(title, message string, tags ...string) tea.Cmd {
 	}
 	cfg := a.pushConfig()
 	if !cfg.Ready() {
+		if !a.noPersist {
+			detail := "phone notifications are off"
+			if a.pushEnabled {
+				detail = "no ntfy topic is set"
+			}
+			_ = notify.Append(model.DataDir(), notify.Entry{
+				At: a.now(), Title: title, Message: message,
+				Outcome: notify.Desktop, Detail: detail,
+			})
+		}
 		return tea.Batch(cmds...)
 	}
+	quiet := a.noPersist
+	dir := model.DataDir()
 	cmds = append(cmds, func() tea.Msg {
 		err := notify.Push(context.Background(), cfg, notify.Message{
 			Title: title, Body: message, Tags: tags, Priority: 4,
 		})
+		if quiet {
+			if err != nil {
+				return pushFailedMsg{err: err}
+			}
+			return nil
+		}
+		entry := notify.Entry{At: time.Now(), Title: title, Message: message, Outcome: notify.Sent}
+		if err != nil {
+			entry.Outcome, entry.Detail = notify.Failed, err.Error()
+		}
+		_ = notify.Append(dir, entry)
 		if err != nil {
 			return pushFailedMsg{err: err}
 		}
@@ -115,9 +138,18 @@ func (a *App) fireEventReminders() tea.Cmd {
 	if a.fired == nil {
 		a.fired = remind.NewFired()
 	}
-	due := remind.Pending(a.events, a.now(), a.fired)
+	due, late := remind.Pending(a.events, a.now(), a.fired)
 	if !a.noPersist {
 		_ = a.fired.Save(model.DataDir())
+		// Record what was never sent, so a missing notification can be told
+		// apart from a broken one.
+		for _, d := range late {
+			_ = notify.Append(model.DataDir(), notify.Entry{
+				At: a.now(), Title: "taskii", Message: d.Message(),
+				Outcome: notify.Skipped,
+				Detail:  "due while taskii was not running",
+			})
+		}
 	}
 	if len(due) == 0 {
 		return nil

@@ -214,3 +214,80 @@ func TestTimelineReflectsEditsImmediately(t *testing.T) {
 		t.Errorf("the timeline did not pick up the new deadline:\n%s", app.View())
 	}
 }
+
+// An empty day should say so, not draw an hour scale with nothing on it and
+// then contradict itself.
+func TestTimelineEmptyDayShowsNoScale(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	a := NewApp(Options{Mock: true, Location: time.UTC})
+	a.now = func() time.Time { return now }
+	a.tasks = nil
+	a.width, a.height = 80, 30
+
+	out := a.renderTimelinePane(60, 12)
+	if !strings.Contains(out, "Nothing is scheduled") {
+		t.Errorf("no empty-day message:\n%s", out)
+	}
+	if strings.Contains(out, "09:00") || strings.Contains(out, "11:00") {
+		t.Errorf("an hour scale was drawn for an empty day:\n%s", out)
+	}
+}
+
+// The pane grows with the day rather than sitting at a fixed size while the
+// column beside it is empty.
+func TestTimelineHeightFollowsTheDay(t *testing.T) {
+	now := time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+	newApp := func() App {
+		a := NewApp(Options{Mock: true, Location: time.UTC})
+		a.now = func() time.Time { return now }
+		a.tasks = nil
+		a.layout = layoutThreeColumn
+		m, _ := a.Update(tea.WindowSizeMsg{Width: 200, Height: 66})
+		return m.(App)
+	}
+
+	quiet := newApp()
+	quiet.addTask("buy oat milk")
+	quietHeight := quiet.geometry().timelineHeight
+
+	busy := newApp()
+	busy.addTask("standup 10:00")
+	busy.addTask("ship it !today @1h")
+	busyHeight := busy.geometry().timelineHeight
+
+	if busyHeight <= quietHeight {
+		t.Errorf("timeline did not grow for a busy day: quiet=%d busy=%d", quietHeight, busyHeight)
+	}
+	// A busy day must not collapse the board.
+	if n := busy.geometry().notesHeight; n < notesMinContentLines+2 {
+		t.Errorf("Notes = %d, below its floor", n)
+	}
+}
+
+// The board scrolls, so giving the timeline room costs visibility, not
+// content.
+func TestNotesScrollWhenTheBoardOverflows(t *testing.T) {
+	a := NewApp(Options{Mock: true, Location: time.UTC})
+	a.tasks = nil
+	a.notes = nil
+	m, _ := a.Update(tea.WindowSizeMsg{Width: 200, Height: 66})
+	app := m.(App)
+	for i := 0; i < 60; i++ {
+		app.saveNote("note number " + itoa(i))
+	}
+	app.focus = focusNotes
+
+	visible := app.visibleRowsFor(focusNotes)
+	if visible >= len(app.notes) {
+		t.Skip("terminal tall enough to show every note")
+	}
+	// Move to the last note; the board must scroll to keep it in view.
+	app.notesSelected = len(app.notes) - 1
+	app.syncScroll()
+	if app.notesScroll == 0 {
+		t.Error("the board did not scroll to the selection")
+	}
+	if !strings.Contains(app.View(), "note number 59") {
+		t.Errorf("the selected note is not visible after scrolling")
+	}
+}

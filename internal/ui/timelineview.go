@@ -138,6 +138,35 @@ func timelineBounds(items []timelineItem, now time.Time) (first, last int) {
 // It re-derives everything from the current task list on each frame, so the
 // dashboard's timeline is correct the moment a deadline or reminder is edited
 // — there is no cached copy to invalidate.
+// timelineDesiredLines is how many content lines the timeline would need to
+// show today in full: every hour of the span, plus a line per item, plus the
+// banner and the "anytime" summary.
+//
+// The pane asks for this rather than a fixed size because the useful height
+// depends entirely on the day — an empty day needs two lines and a busy one
+// needs twenty, and a fixed cap left the pane stuck at three hours while the
+// column beside it sat empty.
+func (a App) timelineDesiredLines() int {
+	items, anytime := a.timelineItems()
+	if len(items) == 0 {
+		// Just the "nothing scheduled" line, plus the summary if there is one.
+		n := 1
+		if anytime > 0 {
+			n += 2
+		}
+		return n
+	}
+	first, last := timelineBounds(items, a.now())
+	lines := (last - first + 1) + len(items)
+	if anytime > 0 {
+		lines += 2
+	}
+	if a.reminderBanner != "" {
+		lines += 2
+	}
+	return lines
+}
+
 func (a App) renderTimelinePane(width, height int) string {
 	if width <= 0 || height <= 0 {
 		return ""
@@ -163,44 +192,50 @@ func (a App) renderTimelinePane(width, height int) string {
 		add("")
 	}
 
-	byHour := map[int][]timelineItem{}
-	for _, it := range items {
-		byHour[it.at.Hour()] = append(byHour[it.at.Hour()], it)
-	}
-
-	first, last := timelineBounds(items, now)
-	nowDrawn := false
-	for h := first; h <= last; h++ {
-		hourItems := byHour[h]
-		// Empty hours are kept so the day reads as a continuous scale rather
-		// than a list that happens to have times on it, but they are dropped
-		// when the terminal is too short to show the whole span.
-		if len(hourItems) == 0 && len(rows) > height-8 {
-			continue
-		}
-		add(muted.Render(fmt.Sprintf("  %02d:00 ┃", h)))
-
-		if h == now.Hour() && !nowDrawn {
-			nowDrawn = true
-			bar := strings.Repeat("━", maxInt(0, minInt(width-18, 30)))
-			rows[len(rows)-1] = muted.Render(fmt.Sprintf("  %02d:00 ┃", h)) +
-				accent.Render(fmt.Sprintf("━━ now %s ", now.Format("15:04"))+bar)
-		}
-
-		for _, it := range hourItems {
-			style := text
-			if it.late {
-				style = late
-			}
-			line := fmt.Sprintf("        ┃ %s %s%s  %s",
-				it.kind.glyph(), it.kind.label(), it.text, it.at.Format("15:04"))
-			add(style.Render(fitToWidth(line, width-4)))
-		}
-	}
-
 	if len(items) == 0 {
-		add(muted.Render("Nothing is scheduled for today."))
+		// An hour scale with nothing on it says less than the sentence does,
+		// and printing both together reads as a contradiction.
+		add(muted.Render("  Nothing is scheduled for today."))
+	} else {
+		byHour := map[int][]timelineItem{}
+		for _, it := range items {
+			byHour[it.at.Hour()] = append(byHour[it.at.Hour()], it)
+		}
+
+		first, last := timelineBounds(items, now)
+		// Empty hours are kept so the day reads as a continuous scale rather
+		// than a list that happens to have times on it. They are the first
+		// thing dropped when the span will not fit, since an hour with
+		// nothing in it is the least informative row on screen.
+		budget := height - 2 - len(rows) - anytimeLines(anytime)
+		skipEmpty := (last-first+1)+len(items) > budget
+
+		for h := first; h <= last; h++ {
+			hourItems := byHour[h]
+			isNow := h == now.Hour()
+			if len(hourItems) == 0 && skipEmpty && !isNow {
+				continue
+			}
+
+			label := muted.Render(fmt.Sprintf("  %02d:00 ┃", h))
+			if isNow {
+				bar := strings.Repeat("━", maxInt(0, minInt(width-24, 24)))
+				label += accent.Render(fmt.Sprintf("━━ now %s ", now.Format("15:04")) + bar)
+			}
+			add(label)
+
+			for _, it := range hourItems {
+				style := text
+				if it.late {
+					style = late
+				}
+				line := fmt.Sprintf("        ┃ %s %s%s  %s",
+					it.kind.glyph(), it.kind.label(), it.text, it.at.Format("15:04"))
+				add(style.Render(fitToWidth(line, width-4)))
+			}
+		}
 	}
+
 	if anytime > 0 {
 		add("")
 		add(muted.Render(fmt.Sprintf("  anytime today: %d task(s) with no time set", anytime)))
@@ -208,6 +243,14 @@ func (a App) renderTimelinePane(width, height int) string {
 
 	title := fmt.Sprintf("Today — %s", now.Format("Mon 02 Jan"))
 	return renderPane(title, strings.Join(rows, "\n"), false, width, height)
+}
+
+// anytimeLines is how many rows the "anytime today" summary will occupy.
+func anytimeLines(anytime int) int {
+	if anytime > 0 {
+		return 2
+	}
+	return 0
 }
 
 func minInt(a, b int) int {

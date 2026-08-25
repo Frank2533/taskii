@@ -94,21 +94,36 @@ const timelineMinContentLines = 3
 
 // splitNotesForTimeline gives the timeline part of the Notes pane's height.
 //
+// want is what the timeline needs to show the day in full. It is granted as
+// far as it can be without pushing Notes below its own floor — the board can
+// scroll, so giving the timeline room costs visibility rather than content.
+//
 // The timeline is dropped rather than shrunk past its minimum when the two
 // cannot both fit: a board squeezed to nothing and a timeline squeezed to
 // nothing are both useless, and Notes was there first.
-func (g *geometry) splitNotesForTimeline() {
+func (g *geometry) splitNotesForTimeline(want int) {
 	if g.notesHeight == 0 {
 		return
 	}
-	notesFloor := notesMinContentLines + 2
-	for _, want := range []int{timelineContentLines + 2, timelineMinContentLines + 2} {
-		if g.notesHeight-want >= notesFloor {
-			g.timelineHeight = want
-			g.notesHeight -= want
-			return
-		}
+	want += 2 // borders
+	if want < timelineMinContentLines+2 {
+		want = timelineMinContentLines + 2
 	}
+	spare := g.notesHeight - (notesMinContentLines + 2)
+	if spare < timelineMinContentLines+2 {
+		return
+	}
+	// Never take more than half of what the two share. A busy day would
+	// otherwise push the board to its floor every time, and the board is not
+	// less important for being quiet.
+	if half := g.notesHeight / 2; want > half && half >= timelineMinContentLines+2 {
+		want = half
+	}
+	if want > spare {
+		want = spare
+	}
+	g.timelineHeight = want
+	g.notesHeight -= want
 }
 
 // notesMinContentLines is the smallest useful Notes board: two rows of bullets
@@ -194,7 +209,7 @@ func (a App) geometry() geometry {
 		g.overdueHeight = taskRows
 		g.notesWidth = a.width - 2*g.taskWidth
 		g.notesHeight = taskRows
-		g.splitNotesForTimeline()
+		g.splitNotesForTimeline(a.timelineDesiredLines())
 		return g
 	}
 
@@ -215,7 +230,7 @@ func (a App) geometry() geometry {
 		// Notes owns its column outright, full height, less the timeline's
 		// share.
 		g.notesHeight = bodyHeight
-		g.splitNotesForTimeline()
+		g.splitNotesForTimeline(a.timelineDesiredLines())
 
 		// Greeting, Reports and Pomodoro split the info column into equal
 		// thirds. Reports takes the rounding remainder (it's the one whose
@@ -312,7 +327,7 @@ func (a App) geometry() geometry {
 		g.reportsHeight += g.notesHeight
 		g.notesHeight = 0
 	}
-	g.splitNotesForTimeline()
+	g.splitNotesForTimeline(a.timelineDesiredLines())
 	return g
 }
 

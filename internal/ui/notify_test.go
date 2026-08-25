@@ -167,3 +167,71 @@ func TestSettingsMasksTheTopic(t *testing.T) {
 		t.Errorf("the topic is not masked:\n%s", out)
 	}
 }
+
+// Task reminders must reach the phone too, not just event reminders. They go
+// through a different function, so the event coverage says nothing about them.
+func TestTaskRemindersPushToThePhone(t *testing.T) {
+	c := &capture{}
+	srv := httptest.NewServer(http.HandlerFunc(c.handler))
+	defer srv.Close()
+
+	model.SetDataDir(t.TempDir())
+	t.Cleanup(func() { model.SetDataDir("") })
+
+	now := time.Now()
+	due := now.Add(-30 * time.Second)
+	a := NewApp(Options{Mock: true, Location: time.UTC})
+	a.now = func() time.Time { return now }
+	a.tasks = []model.Task{{
+		ID: "t1", Title: "start the zepto spider",
+		Date: now.Format(dateFormat), CreatedAt: now, RemindAt: &due,
+	}}
+	a.pushEnabled = true
+	a.ntfyServer = srv.URL
+	a.ntfyTopic = "test-topic"
+
+	runCmd(t, a.fireReminders())
+
+	got := c.got()
+	if len(got) != 1 {
+		t.Fatalf("pushes = %d, want 1: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "start the zepto spider") {
+		t.Errorf("push body = %q, want the task's title", got[0])
+	}
+	if !strings.Contains(got[0], "Time to start") {
+		t.Errorf("push body = %q, want it to say what the reminder is for", got[0])
+	}
+}
+
+// Several tasks coming due at once must not become several pushes.
+func TestSimultaneousTaskRemindersPushOnce(t *testing.T) {
+	c := &capture{}
+	srv := httptest.NewServer(http.HandlerFunc(c.handler))
+	defer srv.Close()
+
+	model.SetDataDir(t.TempDir())
+	t.Cleanup(func() { model.SetDataDir("") })
+
+	now := time.Now()
+	due := now.Add(-time.Minute)
+	a := NewApp(Options{Mock: true, Location: time.UTC})
+	a.now = func() time.Time { return now }
+	a.tasks = []model.Task{
+		{ID: "t1", Title: "first", Date: now.Format(dateFormat), CreatedAt: now, RemindAt: &due},
+		{ID: "t2", Title: "second", Date: now.Format(dateFormat), CreatedAt: now, RemindAt: &due},
+	}
+	a.pushEnabled = true
+	a.ntfyServer = srv.URL
+	a.ntfyTopic = "test-topic"
+
+	runCmd(t, a.fireReminders())
+
+	got := c.got()
+	if len(got) != 1 {
+		t.Fatalf("pushes = %d, want them summarised into one: %v", len(got), got)
+	}
+	if !strings.Contains(got[0], "first") || !strings.Contains(got[0], "1 more") {
+		t.Errorf("push body = %q, want the first named and the rest counted", got[0])
+	}
+}

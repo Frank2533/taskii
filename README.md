@@ -375,7 +375,15 @@ timer, and the CLI launches Obsidian when it is not running.
 
 Reminders announce on the desktop, and optionally on your phone.
 
-**Events remind at 15, 5 and 1 minutes** before each occurrence. A reminder that is
+Two things produce reminders, and both announce the same way — desktop, and
+phone if it is switched on:
+
+- **Tasks and subtasks** remind once, at the moment you set with `@3h`, the
+  picker's one-hour option, or a custom offset. Several coming due together are
+  summarised into a single notification rather than a burst.
+- **Events remind three times**, at 15, 5 and 1 minutes before each occurrence.
+
+A reminder that is
 already late is dropped rather than delivered — a "15 minutes before" warning
 arriving three minutes before is wrong about the one thing it exists to say — and
 recorded as skipped so you can tell that apart from a failure.

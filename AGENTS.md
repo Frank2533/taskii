@@ -798,3 +798,9 @@ Two consequences for the code:
   executing.
 - Listing commands is not a reliable way to discover what exists. Query
   `app.commands.commands` for existence and `checkCallback` for availability.
+
+**Confirmed after the fix.** With the active connection repointed at the
+configured one, `listCommands()` now returns nine jira-sync commands and
+`Check` reports `ready` for all of them. `update-work-log-jira-batch` remains
+absent from the listing until a note carries `jira_worklog_batch`, which is the
+expected order and the one the worklog flush already follows.

@@ -38,6 +38,19 @@ const (
 	AvailReady
 )
 
+func (a Availability) String() string {
+	switch a {
+	case AvailMissing:
+		return "missing"
+	case AvailBlocked:
+		return "blocked"
+	case AvailReady:
+		return "ready"
+	default:
+		return "unknown"
+	}
+}
+
 // Check reports whether a command can run.
 //
 // This exists because an unavailable command is otherwise indistinguishable

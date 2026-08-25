@@ -954,3 +954,21 @@ about to be set is legible before it is committed.
 - **Notes need somewhere in the vault to live.** With Obsidian sync off, the
   pane says the task is unsynced and the key refuses, rather than accepting text
   it would silently discard.
+
+### Subtask reminders
+
+A reminder on a subtask lives in the task line in the vault, not in taskii's
+task store, so the sweep over tasks never saw it: they were parsed, shown beside
+the task, and silently never delivered. `PendingLines` is the separate pass over
+task lines, driven by the same tick.
+
+Their identity is the note path and the task text, deliberately not the line
+number — notes are rewritten by other tools and a task moves up and down the
+file, whereas its text and the time it was set for do not change unless the
+reminder itself does. A line-number key would have re-fired every reminder in a
+note as soon as anything above it was edited.
+
+Tests that exercise persistence cannot use mock mode, which is what normally
+suppresses desktop notifications, so `desktopSend` is indirected and silenced in
+`TestMain`. `runCmd`'s wait is bounded because a tick's batch carries the next
+tick, which sleeps for its whole interval.

@@ -378,9 +378,12 @@ Reminders announce on the desktop, and optionally on your phone.
 Two things produce reminders, and both announce the same way — desktop, and
 phone if it is switched on:
 
-- **Tasks and subtasks** remind once, at the moment you set with `@3h`, the
-  picker's one-hour option, or a custom offset. Several coming due together are
+- **Tasks** remind once, at the moment you set with `@3h`, the picker's
+  one-hour option, or a custom offset. Several coming due together are
   summarised into a single notification rather than a burst.
+- **Subtasks** remind the same way. Their reminder lives in the task line in
+  the vault, so it is swept from there — which also means one written directly
+  in Obsidian is honoured.
 - **Events remind three times**, at 15, 5 and 1 minutes before each occurrence.
 
 A reminder that is

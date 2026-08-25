@@ -397,7 +397,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		// on the next sweep.
 		taskCmd := a.fireReminders()
 		eventCmd := a.fireEventReminders()
-		return a, tea.Batch(taskCmd, eventCmd, reminderTick())
+		subtaskCmd := a.fireSubtaskReminders()
+		return a, tea.Batch(taskCmd, eventCmd, subtaskCmd, reminderTick())
 
 	case pushFailedMsg:
 		// The desktop notification was already shown, so this reports a

@@ -4,6 +4,7 @@ import (
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"sync"
 	"testing"
@@ -36,10 +37,22 @@ func (c *capture) got() []string {
 	return out
 }
 
+// silenceDesktop stops the suite from firing real OS notifications. These tests
+// need persistence switched on, so they cannot rely on the mock-mode check that
+// normally suppresses them.
+func TestMain(m *testing.M) {
+	desktopSend = func(string, string) {}
+	os.Exit(m.Run())
+}
+
 // runCmd drains a tea.Cmd so the pushes it contains actually execute.
 //
 // Batches nest: announce returns a batch, and it is itself batched with the
 // other reminders, so this has to recurse rather than run one level.
+//
+// The wait is bounded because a batch from the reminder tick also carries the
+// next tick, which sleeps for its whole interval. Waiting for that would make
+// every such test take half a minute to assert something that lands at once.
 func runCmd(t *testing.T, cmd tea.Cmd) {
 	t.Helper()
 	if cmd == nil {
@@ -50,13 +63,18 @@ func runCmd(t *testing.T, cmd tea.Cmd) {
 	if !ok {
 		return
 	}
+	done := make(chan struct{})
 	var wg sync.WaitGroup
 	for _, c := range batch {
 		c := c
 		wg.Add(1)
 		go func() { defer wg.Done(); runCmd(t, c) }()
 	}
-	wg.Wait()
+	go func() { wg.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(3 * time.Second):
+	}
 }
 
 func eventApp(t *testing.T, srvURL string, start time.Time, now time.Time) App {

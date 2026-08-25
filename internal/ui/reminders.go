@@ -11,6 +11,7 @@ import (
 
 	"taskii/internal/model"
 	"taskii/internal/notify"
+	"taskii/internal/para"
 	"taskii/internal/remind"
 )
 
@@ -53,21 +54,29 @@ func dueReminders(tasks []model.Task, now time.Time) []int {
 	return out
 }
 
-// desktopNotify sends a desktop notification. Every mechanism is optional: a machine
+// desktopSend is the OS notification call, indirected so tests can silence it
+// without also switching off persistence, which they need to exercise.
+var desktopSend = sendDesktopNotification
+
+// sendDesktopNotification is the real implementation. Every mechanism is optional: a machine
 // without a notifier still gets the in-app banner, so a missing binary degrades
 // rather than breaking.
 func desktopNotify(title, message string) tea.Cmd {
 	return func() tea.Msg {
-		switch runtime.GOOS {
-		case "darwin":
-			script := fmt.Sprintf(`display notification %q with title %q sound name %q`,
-				message, title, notificationSound)
-			_ = exec.Command("osascript", "-e", script).Run()
-		case "linux":
-			_ = exec.Command("notify-send", title, message).Run()
-			playSoundLinux()
-		}
+		desktopSend(title, message)
 		return nil
+	}
+}
+
+func sendDesktopNotification(title, message string) {
+	switch runtime.GOOS {
+	case "darwin":
+		script := fmt.Sprintf(`display notification %q with title %q sound name %q`,
+			message, title, notificationSound)
+		_ = exec.Command("osascript", "-e", script).Run()
+	case "linux":
+		_ = exec.Command("notify-send", title, message).Run()
+		playSoundLinux()
 	}
 }
 
@@ -162,6 +171,69 @@ func (a *App) fireEventReminders() tea.Cmd {
 		cmds = append(cmds, a.announce("taskii", d.Message(), "calendar"))
 	}
 	cmds = append(cmds, func() tea.Msg { return reminderFiredMsg{titles: lines} })
+	return tea.Batch(cmds...)
+}
+
+// subtaskReminders collects every reminder written into a task line in the
+// vault, from tickets and local tasks alike.
+func (a App) subtaskReminders() []remind.Line {
+	if a.idx == nil {
+		return nil
+	}
+	var out []remind.Line
+	collect := func(path string, boxes []para.Checkbox) {
+		for _, c := range boxes {
+			if !c.HasRemind {
+				continue
+			}
+			out = append(out, remind.Line{
+				NotePath: path, Text: c.Text, RemindAt: c.RemindAt, Done: c.Done,
+			})
+		}
+	}
+	for _, t := range a.idx.Tickets {
+		collect(t.Path, t.Checkboxes)
+	}
+	for _, lt := range a.idx.LocalTasks {
+		collect(lt.Path, lt.Checkboxes)
+	}
+	return out
+}
+
+// fireSubtaskReminders delivers reminders set on task lines in the vault.
+//
+// These need their own pass: the note is the record, so nothing in taskii's
+// task store knows about them, and the sweep over tasks never saw them.
+func (a *App) fireSubtaskReminders() tea.Cmd {
+	lines := a.subtaskReminders()
+	if len(lines) == 0 {
+		return nil
+	}
+	if a.fired == nil {
+		a.fired = remind.NewFired()
+	}
+	due, late := remind.PendingLines(lines, a.now(), a.fired)
+	if !a.noPersist {
+		_ = a.fired.Save(model.DataDir())
+		for _, d := range late {
+			_ = notify.Append(model.DataDir(), notify.Entry{
+				At: a.now(), Title: "taskii", Message: d.Message(),
+				Outcome: notify.Skipped,
+				Detail:  "due while taskii was not running",
+			})
+		}
+	}
+	if len(due) == 0 {
+		return nil
+	}
+
+	var cmds []tea.Cmd
+	var titles []string
+	for _, d := range due {
+		titles = append(titles, d.Title)
+		cmds = append(cmds, a.announce("taskii", d.Message(), "alarm_clock"))
+	}
+	cmds = append(cmds, func() tea.Msg { return reminderFiredMsg{titles: titles} })
 	return tea.Batch(cmds...)
 }
 

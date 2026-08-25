@@ -38,6 +38,12 @@ type Due struct {
 
 // Message is the human wording for a reminder.
 func (d Due) Message() string {
+	// A lead of zero is a reminder set for a moment rather than ahead of an
+	// event, which is how a task or subtask reminder works: there is no
+	// "before" to describe.
+	if d.Lead == 0 {
+		return "Time to start: " + d.Title
+	}
 	mins := int(d.Lead / time.Minute)
 	unit := "minutes"
 	if mins == 1 {
@@ -109,6 +115,49 @@ func (f *Fired) Save(dir string) error {
 		return err
 	}
 	return os.WriteFile(path(dir), b, 0o644)
+}
+
+// Line is a reminder written into a task line in a vault note.
+type Line struct {
+	// NotePath and Text identify the line. The line number is deliberately
+	// not part of it: notes are rewritten by other tools and a task moves up
+	// and down the file, whereas its text and the time it was set for do not
+	// change without the reminder itself changing.
+	NotePath string
+	Text     string
+	RemindAt time.Time
+	Done     bool
+}
+
+// lineKey identifies one task-line reminder.
+func lineKey(l Line) string {
+	return fmt.Sprintf("line|%s|%s|%s", l.NotePath, l.Text, l.RemindAt.UTC().Format(time.RFC3339))
+}
+
+// PendingLines returns task-line reminders that are due now, and those that
+// were due but are too late to be worth sending.
+//
+// Reminders on task lines need this separate pass because they live in the
+// vault rather than in taskii's own task list: the note is the record, and
+// nothing in the task store knows about them.
+func PendingLines(lines []Line, now time.Time, fired *Fired) (due, late []Due) {
+	for _, l := range lines {
+		if l.Done || l.RemindAt.IsZero() {
+			continue
+		}
+		k := lineKey(l)
+		if fired.has(k) || now.Before(l.RemindAt) {
+			continue
+		}
+		fired.mark(k, l.RemindAt)
+		d := Due{Key: k, Title: l.Text, EventStart: l.RemindAt}
+		if now.Sub(l.RemindAt) > grace {
+			late = append(late, d)
+			continue
+		}
+		due = append(due, d)
+	}
+	return due, late
 }
 
 // key identifies one reminder: this event, this occurrence, this lead.

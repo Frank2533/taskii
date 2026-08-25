@@ -49,6 +49,20 @@ type Settings struct {
 	// ProjectFolder is the vault folder local task notes are written to.
 	ProjectFolder string `json:"project_folder,omitempty"`
 
+	// PushEnabled opts in to sending reminders to a phone through ntfy. Off
+	// by default: it is the only thing in the app that sends anything off the
+	// machine.
+	PushEnabled bool `json:"push_enabled,omitempty"`
+
+	// NtfyTopic is the channel reminders are published to. An ntfy topic is a
+	// shared channel rather than an account, so on the public server anyone
+	// who knows or guesses it can read every message — it should be long and
+	// unguessable.
+	NtfyTopic string `json:"ntfy_topic,omitempty"`
+
+	// NtfyServer is the ntfy base URL. Empty means the public instance.
+	NtfyServer string `json:"ntfy_server,omitempty"`
+
 	// WorklogPushToJira opts in to sending tracked time to Jira. Off by
 	// default: time is accrued locally and written to the note's freeform
 	// work-log section, and nothing reaches Jira unless this is enabled.

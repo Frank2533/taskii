@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"context"
 	"fmt"
 	"os/exec"
 	"runtime"
@@ -9,6 +10,8 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 
 	"taskii/internal/model"
+	"taskii/internal/notify"
+	"taskii/internal/remind"
 )
 
 // reminderTickMsg drives the reminder sweep.
@@ -50,10 +53,10 @@ func dueReminders(tasks []model.Task, now time.Time) []int {
 	return out
 }
 
-// notify sends a desktop notification. Every mechanism is optional: a machine
+// desktopNotify sends a desktop notification. Every mechanism is optional: a machine
 // without a notifier still gets the in-app banner, so a missing binary degrades
 // rather than breaking.
-func notify(title, message string) tea.Cmd {
+func desktopNotify(title, message string) tea.Cmd {
 	return func() tea.Msg {
 		switch runtime.GOOS {
 		case "darwin":
@@ -66,6 +69,68 @@ func notify(title, message string) tea.Cmd {
 		}
 		return nil
 	}
+}
+
+// announce delivers a notification everywhere the user has asked for one.
+//
+// The desktop notification is sent regardless; the phone push is attempted
+// only when it is configured, and its failure is reported without disturbing
+// the desktop one, which has already been shown.
+func (a App) announce(title, message string, tags ...string) tea.Cmd {
+	var cmds []tea.Cmd
+	// A mock run is a demo or a test: it must not spray the desktop with
+	// notifications, for the same reason it does not write to disk.
+	if !a.noPersist {
+		cmds = append(cmds, desktopNotify(title, message))
+	}
+	cfg := a.pushConfig()
+	if !cfg.Ready() {
+		return tea.Batch(cmds...)
+	}
+	cmds = append(cmds, func() tea.Msg {
+		err := notify.Push(context.Background(), cfg, notify.Message{
+			Title: title, Body: message, Tags: tags, Priority: 4,
+		})
+		if err != nil {
+			return pushFailedMsg{err: err}
+		}
+		return nil
+	})
+	return tea.Batch(cmds...)
+}
+
+// pushConfig is the phone notification settings.
+func (a App) pushConfig() notify.Config {
+	return notify.Config{Enabled: a.pushEnabled, Server: a.ntfyServer, Topic: a.ntfyTopic}
+}
+
+// pushFailedMsg reports that a phone notification could not be delivered.
+type pushFailedMsg struct{ err error }
+
+// fireEventReminders delivers the 15, 5 and 1 minute warnings for events.
+func (a *App) fireEventReminders() tea.Cmd {
+	if len(a.events) == 0 {
+		return nil
+	}
+	if a.fired == nil {
+		a.fired = remind.NewFired()
+	}
+	due := remind.Pending(a.events, a.now(), a.fired)
+	if !a.noPersist {
+		_ = a.fired.Save(model.DataDir())
+	}
+	if len(due) == 0 {
+		return nil
+	}
+
+	var cmds []tea.Cmd
+	var lines []string
+	for _, d := range due {
+		lines = append(lines, d.Message())
+		cmds = append(cmds, a.announce("taskii", d.Message(), "calendar"))
+	}
+	cmds = append(cmds, func() tea.Msg { return reminderFiredMsg{titles: lines} })
+	return tea.Batch(cmds...)
 }
 
 // fireReminders marks due reminders as fired, persists that, and returns the
@@ -90,7 +155,7 @@ func (a *App) fireReminders() tea.Cmd {
 	}
 
 	return tea.Batch(
-		notify("taskii", message),
+		a.announce("taskii", message, "alarm_clock"),
 		func() tea.Msg { return reminderFiredMsg{titles: titles} },
 	)
 }

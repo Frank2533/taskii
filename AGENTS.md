@@ -857,3 +857,23 @@ expected order and the one the worklog flush already follows.
   while the column beside it was empty. It is still capped at half of what it
   shares with the Notes board, because a busy day would otherwise push the
   board to its floor every time.
+
+### Reminders and phone notifications
+
+- **Every event warns at 15, 5 and 1 minutes.** Firing is keyed by occurrence
+  and lead, so a repeating event warns again next time but never twice for the
+  same occurrence, and the markers are persisted so a restart does not replay
+  them.
+- **Late reminders are dropped, not queued.** A "15 minutes before" warning
+  delivered three minutes before is wrong about the thing it exists to say.
+  Missed ones are marked fired without being sent, so they do not arrive in a
+  burst at the next sweep either.
+- **ntfy is the only thing that leaves the machine.** It is off by default and
+  inert without a topic. A topic is a shared channel rather than an account:
+  on the public server anyone who knows or guesses it can read everything sent
+  there, which for work event titles matters. The topic is therefore masked in
+  the settings screen and kept out of error messages, both of which get
+  screenshotted.
+- **A failed push is reported, not retried.** The desktop notification has
+  already been shown by then, so it is a degraded delivery rather than a lost
+  reminder.

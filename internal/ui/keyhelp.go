@@ -72,6 +72,10 @@ func (a App) keyReference() []keySection {
 				{"r", "reindex the vault"},
 				{"C", "export the calendar now"},
 			}},
+			{"Reminders", []keyRow{
+				{"automatic", "15, 5 and 1 minutes before every event"},
+				{",", "settings: enable phone push and set an ntfy topic"},
+			}},
 			{"Event syntax", []keyRow{
 				{"09:30-10:00", "start and end (required)"},
 				{"!tmr !2d !fri", "which day (today if omitted)"},

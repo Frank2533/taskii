@@ -17,6 +17,7 @@ import (
 	"taskii/internal/model"
 	"taskii/internal/obsidian"
 	"taskii/internal/para"
+	"taskii/internal/remind"
 	"taskii/internal/stats"
 	"taskii/internal/worklog"
 )
@@ -176,6 +177,9 @@ type App struct {
 	// showKeys is the "all bindings" overlay.
 	showKeys bool
 
+	// fired remembers which event reminders have already gone out.
+	fired *remind.Fired
+
 	// needsReindex marks that an action wrote to a note and the index is now
 	// behind.
 	needsReindex bool
@@ -191,6 +195,9 @@ type App struct {
 	jiraEnabled        bool
 	obsidianSync       bool
 	projectFolder      string
+	pushEnabled        bool
+	ntfyTopic          string
+	ntfyServer         string
 }
 
 // Options configures NewApp for non-default startup modes.
@@ -242,8 +249,12 @@ func NewApp(opts Options) App {
 	}
 
 	var events []model.Event
+	fired := remind.NewFired()
 	if !opts.Mock {
 		events, _ = model.LoadEvents()
+		if f, err := remind.Load(model.DataDir()); err == nil {
+			fired = f
+		}
 	}
 
 	// Tracked time is a local record, so a mock run must not touch it.
@@ -309,6 +320,7 @@ func NewApp(opts Options) App {
 		obs:       obsidian.New(opts.Vault),
 		wl:        wl,
 		events:    events,
+		fired:     fired,
 
 		tzSetting:          settings.Timezone,
 		vaultSetting:       settings.VaultPath,
@@ -318,6 +330,9 @@ func NewApp(opts Options) App {
 		jiraEnabled:        settings.JiraEnabled(),
 		obsidianSync:       settings.ObsidianSync,
 		projectFolder:      settings.ProjectFolder,
+		pushEnabled:        settings.PushEnabled,
+		ntfyTopic:          settings.NtfyTopic,
+		ntfyServer:         settings.NtfyServer,
 
 		icsOut:   icsOut,
 		icsEvery: settings.ICSEvery(),
@@ -355,7 +370,13 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, pomodoroTick()
 
 	case reminderTickMsg:
-		return a, tea.Batch(a.fireReminders(), reminderTick())
+		return a, tea.Batch(a.fireReminders(), a.fireEventReminders(), reminderTick())
+
+	case pushFailedMsg:
+		// The desktop notification was already shown, so this reports a
+		// degraded delivery rather than a lost reminder.
+		a.err = "phone notification failed: " + msg.err.Error()
+		return a, nil
 
 	case reminderFiredMsg:
 		a.reminderBanner = "Time to start: " + strings.Join(msg.titles, ", ")

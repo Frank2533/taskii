@@ -10,6 +10,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"taskii/internal/model"
+	"taskii/internal/notify"
 )
 
 // settingsField identifies one editable setting.
@@ -24,10 +25,13 @@ const (
 	fieldJira
 	fieldObsidianSync
 	fieldProjectFolder
+	fieldPushEnabled
+	fieldNtfyTopic
+	fieldNtfyServer
 	fieldTheme
 	fieldLayout
 
-	settingsFieldCount = 10
+	settingsFieldCount = 13
 )
 
 // settingsState is the overlay's state. Theme and layout were previously only
@@ -59,6 +63,12 @@ func (f settingsField) label() string {
 		return "Write to Obsidian"
 	case fieldProjectFolder:
 		return "Local task folder"
+	case fieldPushEnabled:
+		return "Phone notifications"
+	case fieldNtfyTopic:
+		return "ntfy topic"
+	case fieldNtfyServer:
+		return "ntfy server"
 	case fieldTheme:
 		return "Theme"
 	default:
@@ -84,6 +94,12 @@ func (f settingsField) help() string {
 		return "Off, taskii only reads the vault. On, it also writes local tasks and notes into it."
 	case fieldProjectFolder:
 		return "Vault folder for local task notes. Finished ones move to " + model.ArchiveLocalTasks + "."
+	case fieldPushEnabled:
+		return "Sends reminders to your phone via ntfy. The only thing here that leaves this machine."
+	case fieldNtfyTopic:
+		return "A topic is a shared channel, not an account — anyone who guesses it can read it. Make it long."
+	case fieldNtfyServer:
+		return "Blank uses " + notify.DefaultServer + ". Set your own to keep messages off the public instance."
 	default:
 		return "Enter to cycle."
 	}
@@ -133,6 +149,23 @@ func (a App) settingsValue(f settingsField) string {
 		return "disabled"
 	case fieldProjectFolder:
 		return s.Projects()
+	case fieldPushEnabled:
+		if a.pushEnabled {
+			return "enabled"
+		}
+		return "disabled"
+	case fieldNtfyTopic:
+		if a.ntfyTopic == "" {
+			return "(not set)"
+		}
+		// Shown masked: it is effectively a password, and this screen gets
+		// shoulder-surfed and screenshotted like any other.
+		return maskTopic(a.ntfyTopic)
+	case fieldNtfyServer:
+		if a.ntfyServer == "" {
+			return "(" + notify.DefaultServer + ")"
+		}
+		return a.ntfyServer
 	case fieldTheme:
 		return currentTheme().Name
 	default:
@@ -153,7 +186,18 @@ func (a App) settings() model.Settings {
 		JiraDisabled:      !a.jiraEnabled,
 		ObsidianSync:      a.obsidianSync,
 		ProjectFolder:     a.projectFolder,
+		PushEnabled:       a.pushEnabled,
+		NtfyTopic:         a.ntfyTopic,
+		NtfyServer:        a.ntfyServer,
 	}
+}
+
+// maskTopic shows just enough of a topic to recognise it.
+func maskTopic(topic string) string {
+	if len(topic) <= 4 {
+		return strings.Repeat("•", len(topic))
+	}
+	return topic[:2] + strings.Repeat("•", len(topic)-4) + topic[len(topic)-2:]
 }
 
 func (a App) renderSettings() string {
@@ -239,6 +283,13 @@ func (a App) beginEditSetting() (tea.Model, tea.Cmd) {
 		a.jiraEnabled = !a.jiraEnabled
 		a.saveSettings()
 		return a, nil
+	case fieldPushEnabled:
+		a.pushEnabled = !a.pushEnabled
+		a.saveSettings()
+		if a.pushEnabled && a.ntfyTopic == "" {
+			a.settingsUI.err = "set a topic below, or nothing will be sent"
+		}
+		return a, nil
 	case fieldObsidianSync:
 		a.obsidianSync = !a.obsidianSync
 		a.saveSettings()
@@ -278,6 +329,12 @@ func (a App) beginEditSetting() (tea.Model, tea.Cmd) {
 	case fieldProjectFolder:
 		in.SetValue(a.projectFolder)
 		in.Placeholder = model.DefaultProjectFolder
+	case fieldNtfyTopic:
+		in.SetValue(a.ntfyTopic)
+		in.Placeholder = "e.g. taskii-8f3ka92mzq"
+	case fieldNtfyServer:
+		in.SetValue(a.ntfyServer)
+		in.Placeholder = notify.DefaultServer
 	}
 	in.Focus()
 	a.settingsUI.input = in
@@ -320,6 +377,16 @@ func (a App) commitSetting(raw string) (tea.Model, tea.Cmd) {
 
 	case fieldProjectFolder:
 		a.projectFolder = value
+
+	case fieldNtfyTopic:
+		a.ntfyTopic = value
+
+	case fieldNtfyServer:
+		if value != "" && !strings.HasPrefix(value, "http://") && !strings.HasPrefix(value, "https://") {
+			a.settingsUI.err = "the server must start with http:// or https://"
+			return a, nil
+		}
+		a.ntfyServer = value
 
 	case fieldICSInterval:
 		if value != "" {

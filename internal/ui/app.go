@@ -144,6 +144,11 @@ type App struct {
 	reminderBanner   string
 	reminderBannerAt time.Time
 
+	// addSuggest is the highlighted ticket in the add box's typeahead, or -1
+	// when the text will be taken as a plain task. Adding a ticket is always
+	// a deliberate selection, never something the typeahead does for you.
+	addSuggest int
+
 	// Raw persisted setting values, kept verbatim so an empty string keeps
 	// meaning "derive this" rather than being frozen into whatever was
 	// derived at startup.
@@ -255,7 +260,11 @@ func NewApp(opts Options) App {
 		username:      currentUsername(),
 		layout:        lay,
 
-		view:      viewDashboard,
+		view: viewDashboard,
+		// -1 means "no suggestion highlighted", so a bare Enter adds what was
+		// typed rather than silently attaching it to the first match.
+		addSuggest: -1,
+
 		vaultPath: opts.Vault,
 		loc:       loc,
 		obs:       obsidian.New(opts.Vault),
@@ -690,7 +699,26 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		}
+		if a.focus == focusToday {
+			// A ticket's subtasks live in the vault note, so toggling one
+			// writes there rather than to any local copy — the note stays the
+			// single source of truth and the two views cannot drift apart.
+			next, reindex := a.toggleTodayRow()
+			if reindex {
+				return next, loadIndex(next.vaultPath, next.loc)
+			}
+			return next, nil
+		}
 		a.toggleSelected()
+		return a, nil
+
+	case "z":
+		// Fold a ticket row away without losing sight of its progress: the
+		// collapsed row still reports its subtask count.
+		if a.focus == focusToday {
+			a.toggleCollapseTodayRow()
+			a.clampSelections()
+		}
 		return a, nil
 
 	case "d":
@@ -781,17 +809,52 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a App) updateAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	suggestions := a.addSuggestions()
+
 	switch msg.String() {
 	case "esc":
 		a.mode = modeNormal
+		a.addSuggest = -1
 		a.input.Blur()
 		return a, nil
+
+	case "up":
+		if len(suggestions) > 0 {
+			a.addSuggest--
+			if a.addSuggest < -1 {
+				a.addSuggest = len(suggestions) - 1
+			}
+			return a, nil
+		}
+
+	case "down", "tab":
+		if len(suggestions) > 0 {
+			a.addSuggest++
+			if a.addSuggest >= len(suggestions) {
+				a.addSuggest = -1
+			}
+			return a, nil
+		}
+
 	case "enter":
-		a.addTask(a.input.Value())
+		// A highlighted suggestion attaches the row to that ticket; otherwise
+		// the text stands on its own, so plain tasks stay a first-class thing
+		// to add here.
+		_, spec := deadline.Parse(a.input.Value(), a.now())
+		if a.addSuggest >= 0 && a.addSuggest < len(suggestions) {
+			a.addTicketTask(suggestions[a.addSuggest], spec)
+		} else {
+			a.addTask(a.input.Value())
+		}
 		a.mode = modeNormal
+		a.addSuggest = -1
 		a.input.Blur()
 		return a, nil
 	}
+
+	// Any edit invalidates the highlighted row, since the list is about to be
+	// recomputed from different text.
+	a.addSuggest = -1
 
 	// Bound the value to the visible field so long titles scroll horizontally
 	// instead of overflowing the pane. This has to happen before Update: the
@@ -1189,8 +1252,13 @@ func isTimeLike(s string) bool {
 
 func (a *App) moveSelection(delta int) {
 	n := len(a.currentList())
-	if a.focus == focusNotes {
+	switch a.focus {
+	case focusNotes:
 		n = len(a.notes)
+	case focusToday:
+		// Today addresses rows, not tasks: an expanded ticket contributes a
+		// line per subtask, so a task count would stop short of the list.
+		n = len(a.todayRows())
 	}
 	if n == 0 {
 		return
@@ -1281,7 +1349,7 @@ func (a App) notesContentWidth() int {
 }
 
 func (a *App) clampSelections() {
-	todayLen := len(a.todayTasks())
+	todayLen := len(a.todayRows())
 	if a.todaySelected >= todayLen {
 		a.todaySelected = todayLen - 1
 	}
@@ -1718,6 +1786,9 @@ func (a App) visibleRowsFor(focus focusedPane) int {
 	rows := contentHeight - indicatorLines
 	if focus == focusToday && a.mode == modeAdding {
 		rows-- // reserve a line for the inline add-task input
+		// The typeahead sits under the input, so its rows come out of the
+		// list too or the pane would grow as you type.
+		rows -= len(a.addSuggestions())
 	}
 	if focus == focusNotes && a.mode == modeNoteEditing {
 		// The note editor is multi-line, so reserve its full height.
@@ -1795,7 +1866,8 @@ func (a App) View() string {
 
 	today := a.todayTasks()
 	todayVisible := a.visibleRowsFor(focusToday)
-	todayBody := renderTaskList(decorateDeadlines(today, a.now()), a.todaySelected, a.todayScroll, todayVisible, a.focus == focusToday, false, leftWidth-4)
+	todayRows := a.todayRows()
+	todayBody := a.renderTodayRows(todayRows, a.todaySelected, a.todayScroll, todayVisible, a.focus == focusToday, leftWidth-4)
 	if a.mode == modeAdding {
 		// Set here rather than once in NewApp so these follow theme changes.
 		a.input.TextStyle = lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
@@ -1830,6 +1902,9 @@ func (a App) View() string {
 			inputLine += lipgloss.NewStyle().Background(colorPaneBg).Render(strings.Repeat(" ", pad))
 		}
 		todayBody += "\n" + inputLine
+		if s := a.renderSuggestions(a.addSuggestions(), leftWidth-4); s != "" {
+			todayBody += "\n" + s
+		}
 	}
 	todayPane := renderPane(fmt.Sprintf("Today (%d)%s", len(today), filters), todayBody, a.focus == focusToday, leftWidth, todayHeight)
 

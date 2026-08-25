@@ -132,8 +132,8 @@ func TestTimelinePlacesRemindersAndDeadlines(t *testing.T) {
 		t.Errorf("anytime = %d, want the untimed task counted separately", anytime)
 	}
 
-	out := a.renderTimeline()
-	for _, want := range []string{"Today's Timeline", "start: zepto spider", "due: zepto spider", "now 12:00"} {
+	out := a.renderTimelinePane(60, 12)
+	for _, want := range []string{"Today", "start: zepto spider", "due: zepto spider", "now 12:00"} {
 		if !strings.Contains(out, want) {
 			t.Errorf("timeline missing %q:\n%s", want, out)
 		}
@@ -160,5 +160,57 @@ func TestRemindersFireOnce(t *testing.T) {
 	tasks[got[0]].Reminded = true
 	if len(dueReminders(tasks, now)) != 0 {
 		t.Error("a fired reminder fired again")
+	}
+}
+
+// The timeline lives on the dashboard, in height taken from the Notes board.
+func TestTimelineAppearsOnTheDashboard(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	a := NewApp(Options{Mock: true, Location: time.UTC})
+	a.now = func() time.Time { return now }
+	a.tasks = nil
+	m, _ := a.Update(tea.WindowSizeMsg{Width: 150, Height: 44})
+	app := m.(App)
+
+	g := app.geometry()
+	if g.timelineHeight == 0 {
+		t.Fatal("no timeline height was allocated on a tall terminal")
+	}
+	if g.notesHeight < notesMinContentLines+2 {
+		t.Errorf("Notes was squeezed below its minimum: %d", g.notesHeight)
+	}
+	if !strings.Contains(app.View(), "Today — ") {
+		t.Errorf("timeline pane is not on the dashboard:\n%s", app.View())
+	}
+}
+
+// A short terminal keeps the board rather than rendering two useless slivers.
+func TestTimelineYieldsToNotesWhenThereIsNoRoom(t *testing.T) {
+	a := NewApp(Options{Mock: true, Location: time.UTC})
+	a.tasks = nil
+	m, _ := a.Update(tea.WindowSizeMsg{Width: 150, Height: 24})
+	app := m.(App)
+	g := app.geometry()
+	if g.notesHeight > 0 && g.notesHeight < notesMinContentLines+2 {
+		t.Errorf("Notes = %d, below its minimum", g.notesHeight)
+	}
+}
+
+// Editing a deadline must show up immediately: the timeline is derived, not
+// cached.
+func TestTimelineReflectsEditsImmediately(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	a := NewApp(Options{Mock: true, Location: time.UTC})
+	a.now = func() time.Time { return now }
+	a.tasks = nil
+	m, _ := a.Update(tea.WindowSizeMsg{Width: 150, Height: 44})
+	app := m.(App)
+
+	if strings.Contains(app.View(), "ship the release") {
+		t.Fatal("task is somehow already present")
+	}
+	app.addTask("ship the release !today")
+	if !strings.Contains(app.View(), "due: ship the release") {
+		t.Errorf("the timeline did not pick up the new deadline:\n%s", app.View())
 	}
 }

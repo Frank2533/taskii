@@ -78,6 +78,37 @@ type geometry struct {
 	// layout it shares the task row with Today and Overdue.
 	notesWidth  int
 	notesHeight int
+
+	// timelineHeight is the Today's Timeline pane, carved out of the Notes
+	// pane's share of the info column. It sits directly above Notes.
+	timelineHeight int
+}
+
+// timelineContentLines is a comfortable timeline: a few hours of scale either
+// side of now, plus the "anytime today" summary.
+const timelineContentLines = 8
+
+// timelineMinContentLines still shows the now marker with a line either side;
+// below that the pane says nothing the status line doesn't.
+const timelineMinContentLines = 3
+
+// splitNotesForTimeline gives the timeline part of the Notes pane's height.
+//
+// The timeline is dropped rather than shrunk past its minimum when the two
+// cannot both fit: a board squeezed to nothing and a timeline squeezed to
+// nothing are both useless, and Notes was there first.
+func (g *geometry) splitNotesForTimeline() {
+	if g.notesHeight == 0 {
+		return
+	}
+	notesFloor := notesMinContentLines + 2
+	for _, want := range []int{timelineContentLines + 2, timelineMinContentLines + 2} {
+		if g.notesHeight-want >= notesFloor {
+			g.timelineHeight = want
+			g.notesHeight -= want
+			return
+		}
+	}
 }
 
 // notesMinContentLines is the smallest useful Notes board: two rows of bullets
@@ -163,6 +194,7 @@ func (a App) geometry() geometry {
 		g.overdueHeight = taskRows
 		g.notesWidth = a.width - 2*g.taskWidth
 		g.notesHeight = taskRows
+		g.splitNotesForTimeline()
 		return g
 	}
 
@@ -180,8 +212,10 @@ func (a App) geometry() geometry {
 		g.todayHeight = bodyHeight / 2
 		g.overdueHeight = bodyHeight - g.todayHeight
 
-		// Notes owns its column outright, full height.
+		// Notes owns its column outright, full height, less the timeline's
+		// share.
 		g.notesHeight = bodyHeight
+		g.splitNotesForTimeline()
 
 		// Greeting, Reports and Pomodoro split the info column into equal
 		// thirds. Reports takes the rounding remainder (it's the one whose
@@ -248,9 +282,23 @@ func (a App) geometry() geometry {
 	// becomes blank filler while Notes sits at its minimum.
 	reportsFull := reportsFullContentLines + 2
 	reportsMin := reportsMinContentLines + 2
-	if remaining-reportsFull >= notesMinContentLines+2 {
+	notesFloor := notesMinContentLines + 2
+	// The timeline's minimum is reserved before Reports chooses its size.
+	// Reports snapping to full would otherwise swallow the entire surplus and
+	// leave Notes sitting exactly on its floor with nothing to hand over, so
+	// the timeline could never appear at the middling terminal heights where
+	// there is plainly room for it.
+	withTimeline := notesFloor + timelineMinContentLines + 2
+	switch {
+	case remaining-reportsFull >= withTimeline:
 		g.reportsHeight = reportsFull
-	} else {
+	case remaining-reportsMin >= withTimeline:
+		// Trading the heatmap for the timeline: the timeline is about today,
+		// the heatmap about history.
+		g.reportsHeight = reportsMin
+	case remaining-reportsFull >= notesFloor:
+		g.reportsHeight = reportsFull
+	default:
 		g.reportsHeight = reportsMin
 	}
 	if g.reportsHeight > remaining {
@@ -264,6 +312,7 @@ func (a App) geometry() geometry {
 		g.reportsHeight += g.notesHeight
 		g.notesHeight = 0
 	}
+	g.splitNotesForTimeline()
 	return g
 }
 

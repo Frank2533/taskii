@@ -133,12 +133,15 @@ func timelineBounds(items []timelineItem, now time.Time) (first, last int) {
 	return first, last
 }
 
-func (a App) renderTimeline() string {
-	height := a.height - a.chromeLines()
-	if height < 3 {
-		height = 3
+// renderTimelinePane draws the timeline into a pane of the given size.
+//
+// It re-derives everything from the current task list on each frame, so the
+// dashboard's timeline is correct the moment a deadline or reminder is edited
+// — there is no cached copy to invalidate.
+func (a App) renderTimelinePane(width, height int) string {
+	if width <= 0 || height <= 0 {
+		return ""
 	}
-	width := a.width
 	now := a.now()
 
 	items, anytime := a.timelineItems()
@@ -203,8 +206,8 @@ func (a App) renderTimeline() string {
 		add(muted.Render(fmt.Sprintf("  anytime today: %d task(s) with no time set", anytime)))
 	}
 
-	title := fmt.Sprintf("Today's Timeline — %s", now.Format("Mon 02 Jan"))
-	return renderPane(title, strings.Join(rows, "\n"), true, width, height)
+	title := fmt.Sprintf("Today — %s", now.Format("Mon 02 Jan"))
+	return renderPane(title, strings.Join(rows, "\n"), false, width, height)
 }
 
 func minInt(a, b int) int {

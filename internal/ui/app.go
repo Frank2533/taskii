@@ -414,9 +414,6 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "3":
 				a.view = viewCalendar
 				return a, nil
-			case "4":
-				a.view = viewTimeline
-				return a, nil
 			case "?":
 				a.showKeys = true
 				return a, nil
@@ -430,7 +427,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch a.view {
 			case viewPARA:
 				return a.updatePara(msg)
-			case viewCalendar, viewTimeline:
+			case viewCalendar:
 				return a.updateCalendar(msg)
 			}
 		}
@@ -1738,7 +1735,7 @@ func (a App) helpGroups() []helpGroup {
 			jiraHelpGroup(a.jiraEnabled),
 			{"", []helpKey{{"p", "track time"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}
-	case viewCalendar, viewTimeline:
+	case viewCalendar:
 		return []helpGroup{
 			{"View", []helpKey{{"1/2/3", "views"}, {",", "settings"}, {"?", "all keys"}}},
 			{"", []helpKey{{"r", "reindex"}, {"C", "export .ics"}, {"q", "quit"}}},
@@ -1938,8 +1935,6 @@ func (a App) View() string {
 		return a.assemblePage(a.renderPara(), helpLine)
 	case viewCalendar:
 		return a.assemblePage(a.renderCalendar(), helpLine)
-	case viewTimeline:
-		return a.assemblePage(a.renderTimeline(), helpLine)
 	}
 
 	g := a.geometry()
@@ -2033,18 +2028,35 @@ func (a App) View() string {
 	pomoBody := renderPomodoro(a.pomo, pomoWidth-4, g.pomoHeight-2)
 	pomoPane := renderPane("Pomodoro", pomoBody, false, pomoWidth, g.pomoHeight)
 
+	// The timeline sits directly above Notes, in the height taken from it.
+	timelinePane := ""
+	if g.timelineHeight > 0 {
+		timelinePane = a.renderTimelinePane(g.notesWidth, g.timelineHeight)
+	}
+
 	notesPane := a.renderNotesPane(g)
+
+	// The timeline occupies the height taken from Notes, so the two travel
+	// together: wherever the board goes in a layout, the timeline sits
+	// directly above it.
+	notesStack := notesPane
+	switch {
+	case timelinePane != "" && notesPane != "":
+		notesStack = lipgloss.JoinVertical(lipgloss.Left, timelinePane, notesPane)
+	case timelinePane != "":
+		notesStack = timelinePane
+	}
 
 	// In the stacked layout Notes is a third task-row column; in the
 	// three-column layout it's a column of its own; otherwise it's the last
 	// pane of the info column.
-	if a.layout == layoutStacked && notesPane != "" {
-		tasks = lipgloss.JoinHorizontal(lipgloss.Top, tasks, notesPane)
+	if a.layout == layoutStacked && notesStack != "" {
+		tasks = lipgloss.JoinHorizontal(lipgloss.Top, tasks, notesStack)
 	}
 
 	infoPanes := []string{greetPane, reportsPane, pomoPane}
-	if a.layout != layoutStacked && a.layout != layoutThreeColumn && notesPane != "" {
-		infoPanes = append(infoPanes, notesPane)
+	if a.layout != layoutStacked && a.layout != layoutThreeColumn && notesStack != "" {
+		infoPanes = append(infoPanes, notesStack)
 	}
 
 	// The gutter between columns is a styled space, not a bare one: an
@@ -2062,7 +2074,7 @@ func (a App) View() string {
 		body = lipgloss.JoinVertical(lipgloss.Left, info, tasks)
 	case layoutThreeColumn:
 		info := lipgloss.JoinVertical(lipgloss.Left, infoPanes...)
-		body = lipgloss.JoinHorizontal(lipgloss.Top, info, gutter, tasks, gutter, notesPane)
+		body = lipgloss.JoinHorizontal(lipgloss.Top, info, gutter, tasks, gutter, notesStack)
 	default:
 		info := lipgloss.JoinVertical(lipgloss.Left, infoPanes...)
 		body = lipgloss.JoinHorizontal(lipgloss.Top, tasks, gutter, info)

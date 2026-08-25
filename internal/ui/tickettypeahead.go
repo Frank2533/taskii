@@ -41,12 +41,29 @@ func (a App) addSuggestions() []para.Match {
 		if a.hasTicketRow(m.Key) {
 			continue
 		}
+		// Archived and closed tickets are finished work; offering them as
+		// something to put on today's list is never what was meant.
+		if tk, ok := a.idx.Ticket(m.Key); ok && (tk.Archived || tk.Closed()) {
+			continue
+		}
 		out = append(out, m)
 		if len(out) == maxSuggestions {
 			break
 		}
 	}
 	return out
+}
+
+// suggestionStatus is the ticket's status, shown so a suggestion can be told
+// apart from a similarly-named one without opening it.
+func (a App) suggestionStatus(key string) string {
+	if a.idx == nil {
+		return ""
+	}
+	if tk, ok := a.idx.Ticket(key); ok {
+		return tk.Status
+	}
+	return ""
 }
 
 // hasTicketRow reports whether a ticket is already on today's list, so the
@@ -100,7 +117,11 @@ func (a App) renderSuggestions(matches []para.Match, width int) string {
 			style = sel
 			prefix = "  > "
 		}
-		lines = append(lines, style.Render(fitToWidth(prefix+m.Label, width)))
+		label := m.Label
+		if st := a.suggestionStatus(m.Key); st != "" {
+			label += "  [" + st + "]"
+		}
+		lines = append(lines, style.Render(fitToWidth(prefix+label, width)))
 	}
 	return strings.Join(lines, "\n")
 }

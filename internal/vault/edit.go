@@ -142,6 +142,42 @@ func SetCheckbox(path string, line int, wantText string, done bool) error {
 	return writeLines(path, lines, mode)
 }
 
+// SetCheckboxText rewrites a task line's text, keeping its indentation,
+// bullet and checked state.
+//
+// As with SetCheckbox, wantText is what the caller believes is there, and the
+// edit is refused on a mismatch rather than overwriting whatever has since
+// taken that line.
+func SetCheckboxText(path string, line int, wantText, newText string) error {
+	newText = strings.TrimSpace(newText)
+	if newText == "" {
+		return ErrStale{Detail: "refusing to blank a task line"}
+	}
+	lines, mode, err := readLines(path)
+	if err != nil {
+		return err
+	}
+	if line < 0 || line >= len(lines) {
+		return ErrStale{Detail: fmt.Sprintf("line %d is outside the note", line)}
+	}
+	current := lines[line]
+	_, gotText, ok := parseCheckbox(strings.TrimSpace(current))
+	if !ok {
+		return ErrStale{Detail: fmt.Sprintf("line %d is no longer a task line", line)}
+	}
+	if wantText != "" && gotText != wantText {
+		return ErrStale{Detail: fmt.Sprintf("line %d now reads %q", line, gotText)}
+	}
+	// Rebuild from the closing bracket so indentation, bullet and state are
+	// all preserved verbatim.
+	close := strings.Index(current, "]")
+	if close < 0 {
+		return ErrStale{Detail: fmt.Sprintf("line %d has no checkbox marker", line)}
+	}
+	lines[line] = current[:close+1] + " " + newText
+	return writeLines(path, lines, mode)
+}
+
 func parseCheckbox(trimmed string) (done bool, text string, ok bool) {
 	for _, bullet := range []string{"- ", "* ", "+ "} {
 		if !strings.HasPrefix(trimmed, bullet) {

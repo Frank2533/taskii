@@ -46,6 +46,10 @@ const (
 	// modeTicketNote reuses the input to append a dated note to a ticket's
 	// freeform work-log section.
 	modeTicketNote
+	// modeEditRow edits the task or subtask under the cursor in place.
+	modeEditRow
+	// modeAddSubtask adds a task line to the selected ticket's note.
+	modeAddSubtask
 )
 
 const dateFormat = "2006-01-02"
@@ -154,6 +158,12 @@ type App struct {
 
 	// picker is the one-keystroke deadline chooser.
 	picker deadlinePicker
+
+	// editing is what an in-progress edit applies to.
+	editing editTarget
+
+	// showKeys is the "all bindings" overlay.
+	showKeys bool
 
 	// Raw persisted setting values, kept verbatim so an empty string keeps
 	// meaning "derive this" rather than being frozen into whatever was
@@ -362,11 +372,20 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.picker.open {
 			return a.updateDeadlinePicker(msg)
 		}
+		if a.showKeys {
+			// Any key dismisses the reference, so it never traps the user.
+			a.showKeys = false
+			return a, nil
+		}
 		switch a.mode {
 		case modeVaultAdding:
 			return a.updateVaultAdding(msg)
 		case modeTicketNote:
 			return a.updateTicketNote(msg)
+		case modeEditRow:
+			return a.updateEditRow(msg)
+		case modeAddSubtask:
+			return a.updateAddSubtask(msg)
 		case modeAdding:
 			return a.updateAdding(msg)
 		case modeConfirmDelete:
@@ -391,6 +410,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return a, nil
 			case "4":
 				a.view = viewTimeline
+				return a, nil
+			case "?":
+				a.showKeys = true
 				return a, nil
 			case ",":
 				a.settingsUI.open = true
@@ -723,6 +745,12 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.toggleSelected()
 		return a, nil
 
+	case "A":
+		if a.focus == focusToday {
+			return a.beginAddSubtask()
+		}
+		return a, nil
+
 	case "D":
 		// A picker, because typing a token per task is more ceremony than it
 		// is worth when you are triaging a list.
@@ -767,7 +795,11 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "e":
-		// Notes-only: expand the board to fill the screen, and back.
+		// Context-sensitive: on a task list it edits the row under the
+		// cursor, on the notes board it expands the board.
+		if a.focus == focusToday || a.focus == focusOverdue {
+			return a.beginEditRow()
+		}
 		if a.focus == focusNotes {
 			a.notesExpanded = !a.notesExpanded
 			// The viewport changes size, so the scroll offset may now leave
@@ -1669,7 +1701,7 @@ func (a App) helpGroups() []helpGroup {
 			return []helpGroup{{"", []helpKey{{"enter", "save"}, {"esc", "cancel"}}}}
 		}
 		return []helpGroup{
-			{"View", []helpKey{{"1/2/3/4", "dash/para/cal/timeline"}, {",", "settings"}}},
+			{"View", []helpKey{{"1/2/3", "views"}, {",", "settings"}, {"?", "all keys"}}},
 			{"Move", []helpKey{{"tab", "pane"}, {"↑/↓ j/k", "select"}, {"enter", "toggle"}}},
 			{"Vault", []helpKey{{"a", "add task"}, {"n", "add note"}, {"u", "set area"}, {"o", "open"}, {"r", "reindex"}}},
 			{"Jira", []helpKey{{"R", "fetch"}, {"s", "status"}, {"c", "comment"}, {"w", "log time"}}},
@@ -1677,7 +1709,7 @@ func (a App) helpGroups() []helpGroup {
 		}
 	case viewCalendar, viewTimeline:
 		return []helpGroup{
-			{"View", []helpKey{{"1/2/3/4", "dash/para/cal/timeline"}, {",", "settings"}}},
+			{"View", []helpKey{{"1/2/3", "views"}, {",", "settings"}, {"?", "all keys"}}},
 			{"", []helpKey{{"r", "reindex"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}
 	}
@@ -1746,12 +1778,17 @@ func (a App) helpGroups() []helpGroup {
 		taskKeys = nil
 	}
 	taskKeys = append(taskKeys,
-		helpKey{"space/enter", "toggle"}, helpKey{"d", "delete"}, helpKey{"i", "important"})
+		helpKey{"e", "edit"}, helpKey{"space/enter", "toggle"},
+		helpKey{"D", "deadline"}, helpKey{"d", "delete"}, helpKey{"i", "important"})
+	if a.focus == focusToday {
+		taskKeys = append(taskKeys, helpKey{"A", "subtask"}, helpKey{"z", "fold"})
+	}
 
 	return []helpGroup{
 		{"Task", taskKeys},
 		{"View", []helpKey{
 			{"tab", "switch pane"}, {"↑/↓ j/k", "navigate"}, {"I/U", "filters"},
+			{"1/2/3", "views"}, {"?", "all keys"},
 		}},
 		// Pomodoro's keys aren't listed here — they're rendered inside the
 		// Pomodoro pane itself, next to the thing they control.
@@ -1803,8 +1840,8 @@ func (a App) visibleRowsFor(focus focusedPane) int {
 	// otherwise the pane grows by a line whenever "N more" starts appearing.
 	indicatorLines := 1
 	rows := contentHeight - indicatorLines
-	if focus == focusToday && a.mode == modeAdding {
-		rows-- // reserve a line for the inline add-task input
+	if focus == focusToday && (a.mode == modeAdding || a.mode == modeEditRow || a.mode == modeAddSubtask) {
+		rows-- // reserve a line for the inline input
 		// The typeahead sits under the input, so its rows come out of the
 		// list too or the pane would grow as you type.
 		rows -= len(a.addSuggestions())
@@ -1861,6 +1898,9 @@ func (a App) View() string {
 	if a.picker.open {
 		return a.assemblePage(a.renderDeadlinePicker(), helpLine)
 	}
+	if a.showKeys {
+		return a.assemblePage(a.renderKeyHelp(), helpLine)
+	}
 
 	switch a.view {
 	case viewPARA:
@@ -1890,7 +1930,7 @@ func (a App) View() string {
 	todayVisible := a.visibleRowsFor(focusToday)
 	todayRows := a.todayRows()
 	todayBody := a.renderTodayRows(todayRows, a.todaySelected, a.todayScroll, todayVisible, a.focus == focusToday, leftWidth-4)
-	if a.mode == modeAdding {
+	if a.mode == modeAdding || a.mode == modeEditRow || a.mode == modeAddSubtask {
 		// Set here rather than once in NewApp so these follow theme changes.
 		a.input.TextStyle = lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
 		a.input.PlaceholderStyle = lipgloss.NewStyle().Foreground(colorMuted).Background(colorPaneBg)

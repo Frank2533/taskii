@@ -178,6 +178,9 @@ func (a *App) toggleCollapseTodayRow() {
 	if !r.task.IsTicket() {
 		return
 	}
+	// Collapsing from a subtask row folds its parent. Requiring the cursor to
+	// be on the ticket line made the key look broken from the rows where you
+	// most want to use it.
 	for i := range a.tasks {
 		if a.tasks[i].ID == r.task.ID {
 			a.tasks[i].Collapsed = !a.tasks[i].Collapsed

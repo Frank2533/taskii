@@ -222,3 +222,132 @@ func TestDeadlinePickerSetsADeadline(t *testing.T) {
 		t.Errorf("deadline day = %d, want tomorrow", got)
 	}
 }
+
+func TestKeyReferenceOverlayListsBindings(t *testing.T) {
+	a, _ := dashApp(t)
+	a = press(t, a, "?")
+	if !a.showKeys {
+		t.Fatal("? did not open the reference")
+	}
+	out := a.View()
+	for _, want := range []string{"add a subtask", "fold a ticket", "set a deadline", "!today"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("reference missing %q", want)
+		}
+	}
+	// Any key dismisses it, so it can never trap the user.
+	a = press(t, a, "x")
+	if a.showKeys {
+		t.Error("reference stayed open")
+	}
+}
+
+func TestEditingATaskChangesItsTitle(t *testing.T) {
+	a, _ := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "buy milk")
+	a = press(t, a, "enter")
+
+	a.todaySelected = 0
+	a = press(t, a, "e")
+	if a.mode != modeEditRow {
+		t.Fatalf("mode = %v, want modeEditRow", a.mode)
+	}
+	if a.input.Value() != "buy milk" {
+		t.Errorf("input seeded with %q, want the existing title", a.input.Value())
+	}
+	a.input.SetValue("buy oat milk !tmr")
+	a = press(t, a, "enter")
+
+	if a.tasks[0].Title != "buy oat milk" {
+		t.Errorf("title = %q, want the edited text with tokens stripped", a.tasks[0].Title)
+	}
+	if !a.tasks[0].HasDue() {
+		t.Error("editing should accept deadline tokens too")
+	}
+}
+
+func TestEditingASubtaskWritesToTheVault(t *testing.T) {
+	a, root := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "normalize")
+	a = press(t, a, "down", "enter")
+
+	a.todaySelected = 2 // the second subtask
+	a = press(t, a, "e")
+	if a.mode != modeEditRow {
+		t.Fatalf("mode = %v, want modeEditRow", a.mode)
+	}
+	a.input.SetValue("check zepto store spider")
+	next, cmd := a.Update(tea.KeyMsg{Type: tea.KeyEnter})
+	a = next.(App)
+	if a.err != "" {
+		t.Fatalf("edit reported: %s", a.err)
+	}
+	if cmd == nil {
+		t.Error("editing a subtask should reindex")
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "Tickets", "AAA-1 In Progress live.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "- [ ] check zepto store spider") {
+		t.Errorf("subtask text not updated:\n%s", body)
+	}
+}
+
+func TestAddSubtaskAppendsToTheTicketNote(t *testing.T) {
+	a, root := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "normalize")
+	a = press(t, a, "down", "enter")
+
+	a.todaySelected = 0 // the ticket row
+	a = press(t, a, "A")
+	if a.mode != modeAddSubtask {
+		t.Fatalf("mode = %v, want modeAddSubtask", a.mode)
+	}
+	a.input.SetValue("verify replication")
+	a = press(t, a, "enter")
+	if a.err != "" {
+		t.Fatalf("add subtask reported: %s", a.err)
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "Tickets", "AAA-1 In Progress live.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "- [ ] verify replication") {
+		t.Errorf("subtask not appended:\n%s", body)
+	}
+}
+
+// Finished work must never be offered as something to start today.
+func TestSuggestionsExcludeArchivedAndClosedTickets(t *testing.T) {
+	a, _ := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "archived")
+	for _, m := range a.addSuggestions() {
+		if m.Key == "AAA-3" || m.Key == "AAA-4" {
+			t.Errorf("archived ticket %s was suggested", m.Key)
+		}
+	}
+	a = press(t, a, "esc")
+	a = press(t, a, "a")
+	a = typeInto(a, "stranded")
+	for _, m := range a.addSuggestions() {
+		if m.Key == "AAA-2" {
+			t.Error("a closed ticket was suggested")
+		}
+	}
+}
+
+func TestSuggestionsShowTicketStatus(t *testing.T) {
+	a, _ := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "normalize")
+	if !strings.Contains(a.View(), "[In Progress]") {
+		t.Errorf("suggestion does not show status:\n%s", a.View())
+	}
+}

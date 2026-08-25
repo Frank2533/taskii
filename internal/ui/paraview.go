@@ -18,8 +18,9 @@ const (
 	viewDashboard view = iota
 	viewPARA
 	viewCalendar
+	viewTimeline
 
-	viewCount = 3
+	viewCount = 4
 )
 
 func (v view) String() string {
@@ -28,6 +29,8 @@ func (v view) String() string {
 		return "PARA"
 	case viewCalendar:
 		return "Calendar"
+	case viewTimeline:
+		return "Timeline"
 	default:
 		return "Dashboard"
 	}

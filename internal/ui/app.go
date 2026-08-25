@@ -138,6 +138,12 @@ type App struct {
 
 	settingsUI settingsState
 
+	// reminderBanner holds the most recent start-reminder text so it stays
+	// visible in the app as well as on the desktop; a desktop notification
+	// disappears whether or not it was seen.
+	reminderBanner   string
+	reminderBannerAt time.Time
+
 	// Raw persisted setting values, kept verbatim so an empty string keeps
 	// meaning "derive this" rather than being frozen into whatever was
 	// derived at startup.
@@ -267,7 +273,7 @@ func NewApp(opts Options) App {
 }
 
 func (a App) Init() tea.Cmd {
-	cmds := []tea.Cmd{pomodoroTick()}
+	cmds := []tea.Cmd{pomodoroTick(), reminderTick()}
 	// The vault is indexed off the UI goroutine so a large vault never delays
 	// the first paint.
 	if c := loadIndex(a.vaultPath, a.loc); c != nil {
@@ -295,6 +301,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a, tea.Batch(pomodoroTick(), notifyPhaseChange(a.pomo.phase))
 		}
 		return a, pomodoroTick()
+
+	case reminderTickMsg:
+		return a, tea.Batch(a.fireReminders(), reminderTick())
+
+	case reminderFiredMsg:
+		a.reminderBanner = "Time to start: " + strings.Join(msg.titles, ", ")
+		a.reminderBannerAt = a.now()
+		return a, nil
 
 	case indexMsg:
 		a.idx, a.idxErr = msg.idx, msg.err
@@ -355,6 +369,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			case "3":
 				a.view = viewCalendar
 				return a, nil
+			case "4":
+				a.view = viewTimeline
+				return a, nil
 			case ",":
 				a.settingsUI.open = true
 				a.settingsUI.err = ""
@@ -365,7 +382,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			switch a.view {
 			case viewPARA:
 				return a.updatePara(msg)
-			case viewCalendar:
+			case viewCalendar, viewTimeline:
 				return a.updateCalendar(msg)
 			}
 		}
@@ -1565,16 +1582,16 @@ func (a App) helpGroups() []helpGroup {
 			return []helpGroup{{"", []helpKey{{"enter", "add"}, {"esc", "cancel"}}}}
 		}
 		return []helpGroup{
-			{"View", []helpKey{{"1/2/3", "dash/para/cal"}, {",", "settings"}}},
+			{"View", []helpKey{{"1/2/3/4", "dash/para/cal/timeline"}, {",", "settings"}}},
 			{"Move", []helpKey{{"tab", "pane"}, {"↑/↓ j/k", "select"}, {"enter", "toggle"}}},
 			{"Vault", []helpKey{{"a", "add task"}, {"u", "set area"}, {"o", "open"}, {"r", "reindex"}}},
 			{"Jira", []helpKey{{"R", "fetch"}, {"s", "status"}, {"c", "comment"}, {"w", "log time"}}},
 			{"", []helpKey{{"p", "track time"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}
-	case viewCalendar:
+	case viewCalendar, viewTimeline:
 		return []helpGroup{
-			{"View", []helpKey{{"1/2/3", "dash/para/cal"}, {",", "settings"}}},
-			{"Calendar", []helpKey{{"r", "reindex"}, {"C", "export .ics"}, {"q", "quit"}}},
+			{"View", []helpKey{{"1/2/3/4", "dash/para/cal/timeline"}, {",", "settings"}}},
+			{"", []helpKey{{"r", "reindex"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}
 	}
 
@@ -1757,6 +1774,8 @@ func (a App) View() string {
 		return a.assemblePage(a.renderPara(), helpLine)
 	case viewCalendar:
 		return a.assemblePage(a.renderCalendar(), helpLine)
+	case viewTimeline:
+		return a.assemblePage(a.renderTimeline(), helpLine)
 	}
 
 	g := a.geometry()

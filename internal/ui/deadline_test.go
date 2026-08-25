@@ -108,3 +108,57 @@ func taskAt(title, date string, due *time.Time) model.Task {
 	t.Due = due
 	return t
 }
+
+func TestTimelinePlacesRemindersAndDeadlines(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	a := NewApp(Options{Mock: true, Location: time.UTC})
+	a.now = func() time.Time { return now }
+	a.width, a.height = 150, 40
+
+	remind := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC)
+	due := time.Date(2026, 8, 26, 23, 59, 59, 0, time.UTC)
+	task := taskAt("zepto spider", now.Format(dateFormat), &due)
+	task.RemindAt = &remind
+	a.tasks = []model.Task{task, taskAt("no time set", now.Format(dateFormat), nil)}
+
+	items, anytime := a.timelineItems()
+	if len(items) != 2 {
+		t.Fatalf("timeline items = %d, want a reminder and a deadline: %+v", len(items), items)
+	}
+	if items[0].kind != tlReminder || items[1].kind != tlDeadline {
+		t.Errorf("order = %v/%v, want reminder then deadline", items[0].kind, items[1].kind)
+	}
+	if anytime != 1 {
+		t.Errorf("anytime = %d, want the untimed task counted separately", anytime)
+	}
+
+	out := a.renderTimeline()
+	for _, want := range []string{"Today's Timeline", "start: zepto spider", "due: zepto spider", "now 12:00"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("timeline missing %q:\n%s", want, out)
+		}
+	}
+}
+
+// A reminder must fire once and stay fired, or restarting replays every
+// reminder that already passed.
+func TestRemindersFireOnce(t *testing.T) {
+	now := time.Date(2026, 8, 26, 12, 0, 0, 0, time.UTC)
+	past := now.Add(-time.Minute)
+	future := now.Add(time.Hour)
+
+	early := taskAt("due now", now.Format(dateFormat), nil)
+	early.RemindAt = &past
+	later := taskAt("later", now.Format(dateFormat), nil)
+	later.RemindAt = &future
+
+	tasks := []model.Task{early, later}
+	got := dueReminders(tasks, now)
+	if len(got) != 1 || tasks[got[0]].Title != "due now" {
+		t.Fatalf("dueReminders = %v, want just the past one", got)
+	}
+	tasks[got[0]].Reminded = true
+	if len(dueReminders(tasks, now)) != 0 {
+		t.Error("a fired reminder fired again")
+	}
+}

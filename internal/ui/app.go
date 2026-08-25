@@ -164,6 +164,9 @@ type App struct {
 	// picker is the one-keystroke deadline chooser.
 	picker deadlinePicker
 
+	// form is the custom reminder offset form, opened from the picker.
+	form reminderForm
+
 	// events are calendar entries: time that is spoken for, as opposed to
 	// tasks, which are work to finish.
 	events []model.Event
@@ -427,6 +430,9 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		if a.settingsUI.open {
 			return a.updateSettings(msg)
+		}
+		if a.form.open {
+			return a.updateReminderForm(msg)
 		}
 		if a.picker.open {
 			return a.updateDeadlinePicker(msg)
@@ -2085,6 +2091,9 @@ func (a App) View() string {
 	// pane here is already a fixed-size block.
 	if a.settingsUI.open {
 		return a.assemblePage(a.renderSettings(), helpLine)
+	}
+	if a.form.open {
+		return a.assemblePage(a.renderReminderForm(), helpLine)
 	}
 	if a.picker.open {
 		return a.assemblePage(a.renderDeadlinePicker(), helpLine)

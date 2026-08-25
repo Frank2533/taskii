@@ -925,3 +925,13 @@ that never arrived leaves nothing behind: the phone shows nothing either way,
 and whether it was skipped, refused or never attempted is exactly the question.
 Skipped reminders are logged with the reason, and the ntfy topic is never
 written to the log, which is meant to be pasted when something is wrong.
+
+### The custom reminder form
+
+Three boxes rather than one free-text duration: the offsets people actually
+want are mixed units ("2 days and 3 hours"), and a single field would have to
+teach a syntax for that before it could accept one. Days defaults to 0 because
+the common case is a reminder later the same day, and a box showing "0" has its
+leading zero replaced by the first digit typed rather than appended to. The
+offset is echoed back in words with the resulting date and time, so what is
+about to be set is legible before it is committed.

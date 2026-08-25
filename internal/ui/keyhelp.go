@@ -102,6 +102,7 @@ func (a App) keyReference() []keySection {
 			{"d", "delete"},
 			{"i", "mark important"},
 			{"D", "set a deadline or start reminder"},
+			{"D then c", "custom reminder: days, hours, minutes"},
 			{"z", "fold a ticket's subtasks"},
 		}},
 		{"Filter and move", []keyRow{

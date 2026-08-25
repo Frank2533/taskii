@@ -113,6 +113,8 @@ func (a App) updateDeadlinePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a.setPickerDue(deadline.InDays(now, 1), "tomorrow")
 	case "w":
 		return a.setPickerDue(deadline.EndOfWeek(now), "end of week")
+	case "c":
+		return a.beginReminderForm()
 	case "h":
 		d := time.Hour
 		a.applyDeadline(nil, &d)
@@ -165,6 +167,7 @@ func (a App) renderDeadlinePicker() string {
 		"",
 		muted.Render("  Start reminder"),
 		row("h", "in 1 hour"),
+		row("c", "custom: days, hours, minutes"),
 		"",
 		muted.Render("  esc  cancel"),
 	}

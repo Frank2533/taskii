@@ -43,6 +43,9 @@ const (
 	// modeVaultAdding reuses the task input to append a checkbox to a note in
 	// the vault rather than creating a local task.
 	modeVaultAdding
+	// modeTicketNote reuses the input to append a dated note to a ticket's
+	// freeform work-log section.
+	modeTicketNote
 )
 
 const dateFormat = "2006-01-02"
@@ -148,6 +151,9 @@ type App struct {
 	// when the text will be taken as a plain task. Adding a ticket is always
 	// a deliberate selection, never something the typeahead does for you.
 	addSuggest int
+
+	// picker is the one-keystroke deadline chooser.
+	picker deadlinePicker
 
 	// Raw persisted setting values, kept verbatim so an empty string keeps
 	// meaning "derive this" rather than being frozen into whatever was
@@ -353,9 +359,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		if a.settingsUI.open {
 			return a.updateSettings(msg)
 		}
+		if a.picker.open {
+			return a.updateDeadlinePicker(msg)
+		}
 		switch a.mode {
 		case modeVaultAdding:
 			return a.updateVaultAdding(msg)
+		case modeTicketNote:
+			return a.updateTicketNote(msg)
 		case modeAdding:
 			return a.updateAdding(msg)
 		case modeConfirmDelete:
@@ -710,6 +721,14 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return next, nil
 		}
 		a.toggleSelected()
+		return a, nil
+
+	case "D":
+		// A picker, because typing a token per task is more ceremony than it
+		// is worth when you are triaging a list.
+		if a.focus == focusToday || a.focus == focusOverdue {
+			a.picker.open = true
+		}
 		return a, nil
 
 	case "z":
@@ -1646,13 +1665,13 @@ func (a App) helpGroups() []helpGroup {
 
 	switch a.view {
 	case viewPARA:
-		if a.mode == modeVaultAdding {
-			return []helpGroup{{"", []helpKey{{"enter", "add"}, {"esc", "cancel"}}}}
+		if a.mode == modeVaultAdding || a.mode == modeTicketNote {
+			return []helpGroup{{"", []helpKey{{"enter", "save"}, {"esc", "cancel"}}}}
 		}
 		return []helpGroup{
 			{"View", []helpKey{{"1/2/3/4", "dash/para/cal/timeline"}, {",", "settings"}}},
 			{"Move", []helpKey{{"tab", "pane"}, {"↑/↓ j/k", "select"}, {"enter", "toggle"}}},
-			{"Vault", []helpKey{{"a", "add task"}, {"u", "set area"}, {"o", "open"}, {"r", "reindex"}}},
+			{"Vault", []helpKey{{"a", "add task"}, {"n", "add note"}, {"u", "set area"}, {"o", "open"}, {"r", "reindex"}}},
 			{"Jira", []helpKey{{"R", "fetch"}, {"s", "status"}, {"c", "comment"}, {"w", "log time"}}},
 			{"", []helpKey{{"p", "track time"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}
@@ -1838,6 +1857,9 @@ func (a App) View() string {
 	// pane here is already a fixed-size block.
 	if a.settingsUI.open {
 		return a.assemblePage(a.renderSettings(), helpLine)
+	}
+	if a.picker.open {
+		return a.assemblePage(a.renderDeadlinePicker(), helpLine)
 	}
 
 	switch a.view {

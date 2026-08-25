@@ -69,6 +69,9 @@ func (a App) updatePara(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "a":
 		return a.beginQuickAdd()
 
+	case "n":
+		return a.beginTicketNote()
+
 	case "u":
 		return a.cycleAreaOnSelected()
 
@@ -190,6 +193,61 @@ func (a App) commitQuickAdd(text string) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	a.status = "added to " + t.Key
+	return a, loadIndex(a.vaultPath, a.loc)
+}
+
+// beginTicketNote opens the input for a note against the selected ticket.
+func (a App) beginTicketNote() (tea.Model, tea.Cmd) {
+	if _, ok := a.selectedTicket(); !ok {
+		a.err = "select a ticket first"
+		return a, nil
+	}
+	a.mode = modeTicketNote
+	a.input.SetValue("")
+	a.input.Placeholder = "note for this ticket"
+	a.input.Focus()
+	return a, nil
+}
+
+// updateTicketNote handles the note input.
+func (a App) updateTicketNote(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		a.mode = modeNormal
+		a.input.Blur()
+		a.input.SetValue("")
+		return a, nil
+	case "enter":
+		return a.commitTicketNote(a.input.Value())
+	}
+	var cmd tea.Cmd
+	a.input, cmd = a.input.Update(msg)
+	return a, cmd
+}
+
+// commitTicketNote appends a dated note to the ticket.
+//
+// It goes to the freeform work-log section, which jira-sync leaves alone.
+// The synced sections are rewritten wholesale on every fetch, so a note
+// written there would disappear at the next sync.
+func (a App) commitTicketNote(text string) (tea.Model, tea.Cmd) {
+	text = strings.TrimSpace(text)
+	a.mode = modeNormal
+	a.input.Blur()
+	a.input.SetValue("")
+	if text == "" {
+		return a, nil
+	}
+	t, ok := a.selectedTicket()
+	if !ok {
+		return a, nil
+	}
+	line := fmt.Sprintf("- %s — %s", time.Now().In(a.loc).Format("2006-01-02 15:04"), text)
+	if err := vault.AppendUnderHeading(t.Path, worklogHeading, line); err != nil {
+		a.err = err.Error()
+		return a, nil
+	}
+	a.status = "note added to " + t.Key
 	return a, loadIndex(a.vaultPath, a.loc)
 }
 

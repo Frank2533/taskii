@@ -167,3 +167,58 @@ func TestTogglingASubtaskWritesToTheVault(t *testing.T) {
 		t.Error("toggling should trigger a reindex so the two views agree")
 	}
 }
+
+func TestTicketNoteAppendsToWorkLog(t *testing.T) {
+	a, root := dashApp(t)
+	a = press(t, a, "2")   // PARA view
+	a = press(t, a, "tab") // focus the ticket list
+	a = press(t, a, "n")   // start a note
+	if a.mode != modeTicketNote {
+		t.Fatalf("mode = %v, want modeTicketNote", a.mode)
+	}
+	a = typeInto(a, "spoke to DS team")
+	if !strings.Contains(a.View(), "spoke to DS team") {
+		t.Error("the note input is not rendered")
+	}
+	a = press(t, a, "enter")
+
+	notePath := filepath.Join(root, "Tickets", "AAA-1 In Progress live.md")
+	body, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(body), "spoke to DS team") {
+		t.Errorf("note was not written:\n%s", body)
+	}
+	// It must land in the freeform section, not in one the Jira sync rewrites.
+	idx := strings.Index(string(body), "## Work Log / Updates")
+	if idx < 0 || strings.Index(string(body), "spoke to DS team") < idx {
+		t.Error("note did not land under Work Log / Updates")
+	}
+}
+
+func TestDeadlinePickerSetsADeadline(t *testing.T) {
+	a, _ := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "buy milk")
+	a = press(t, a, "enter")
+
+	a.todaySelected = 0
+	a = press(t, a, "D")
+	if !a.picker.open {
+		t.Fatal("picker did not open")
+	}
+	if !strings.Contains(a.View(), "tomorrow") {
+		t.Error("picker does not list its options")
+	}
+	a = press(t, a, "m") // tomorrow
+	if a.picker.open {
+		t.Error("picker stayed open after a choice")
+	}
+	if len(a.tasks) != 1 || !a.tasks[0].HasDue() {
+		t.Fatalf("no deadline set: %+v", a.tasks)
+	}
+	if got := a.tasks[0].Deadline().Day(); got != a.now().AddDate(0, 0, 1).Day() {
+		t.Errorf("deadline day = %d, want tomorrow", got)
+	}
+}

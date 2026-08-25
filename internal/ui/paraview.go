@@ -176,7 +176,7 @@ type paraGeometry struct {
 
 func (a App) paraGeometry() paraGeometry {
 	height := a.height - a.chromeLines()
-	if a.mode == modeVaultAdding {
+	if a.mode == modeVaultAdding || a.mode == modeTicketNote {
 		// The input occupies a line below the panes.
 		height--
 	}
@@ -241,7 +241,7 @@ func (a App) renderPara() string {
 // terminal width — a prompt tucked into the detail pane would simply vanish on
 // a narrow terminal, which is what made typing look like it did nothing.
 func (a App) withQuickAdd(body string, g paraGeometry) string {
-	if a.mode != modeVaultAdding {
+	if a.mode != modeVaultAdding && a.mode != modeTicketNote {
 		return body
 	}
 	target := ""
@@ -249,7 +249,11 @@ func (a App) withQuickAdd(body string, g paraGeometry) string {
 		target = t.Key
 	}
 	prompt := inputPromptStyle.Render("+ ")
-	label := lipgloss.NewStyle().Foreground(colorMuted).Render(target + " " + quickAddHeading + "  ")
+	section := quickAddHeading
+	if a.mode == modeTicketNote {
+		section = worklogHeading
+	}
+	label := lipgloss.NewStyle().Foreground(colorMuted).Render(target + " " + section + "  ")
 
 	a.input.TextStyle = lipgloss.NewStyle().Foreground(colorText)
 	a.input.PromptStyle = lipgloss.NewStyle().Foreground(colorAccent)

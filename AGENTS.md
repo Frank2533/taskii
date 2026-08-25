@@ -804,3 +804,31 @@ configured one, `listCommands()` now returns nine jira-sync commands and
 `Check` reports `ready` for all of them. `update-work-log-jira-batch` remains
 absent from the listing until a note carries `jira_worklog_batch`, which is the
 expected order and the one the worklog flush already follows.
+
+### Deadlines, reminders and ticket rows
+
+- **A deadline is not the day bucket.** `Task.Date` decides which list a task
+  appears in, so overloading it as a deadline would remove a task from Today
+  until its due day. `Due` is separate, and `RemindAt` answers the different
+  question of when to start.
+- **Overdue now means two things** — carried over from an earlier day, and
+  deadline missed — shown together with missed deadlines first, because a task
+  due today can be late while still belonging to today.
+- **Inline tokens are stripped before the appointment check.** taskii already
+  treats a trailing `14:30` as "make this an appointment", so `!tmr` has to be
+  removed first or a deadline could be read as a clock time. Unrecognised
+  tokens stay in the title: `email !bob about @home` is left alone.
+- **Reminder offsets resolve at entry time**, which is what `@3h` means, and
+  firing is recorded on the task so a restart does not replay old reminders.
+- **Badges decorate copies.** A decorated title must never reach the stored
+  list or markers accumulate on every save; a test pins this.
+- **Today addresses rows, not tasks.** An expanded ticket contributes a line per
+  subtask, so a task index would stop short of the list. The typeahead's rows
+  are subtracted from the visible count too, or the pane grows as you type.
+- **Subtask toggles write to the vault note**, never to a local copy, so the
+  dashboard and the PARA view cannot disagree about a ticket's tasks.
+- **Tickets are chosen, not mirrored.** Nothing is highlighted in the typeahead
+  until you press down, so a bare Enter still adds exactly what was typed.
+- **Ticket notes go to the work-log section.** The `jira-sync-section-*` blocks
+  are rewritten wholesale on every fetch, so anything written there is lost at
+  the next sync.

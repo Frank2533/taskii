@@ -181,7 +181,7 @@ func parseDate(v any, loc *time.Location) (time.Time, bool) {
 }
 
 // checkboxes extracts every task line in the body, tagged with the heading it
-// sits under.
+// sits under and with any note block written beneath it.
 func checkboxes(n *Note, loc *time.Location) []Checkbox {
 	var out []Checkbox
 	heading := ""
@@ -195,6 +195,13 @@ func checkboxes(n *Note, loc *time.Location) []Checkbox {
 		}
 		done, text, ok := parseCheckbox(trimmed)
 		if !ok {
+			// An indented, non-task line directly under a task belongs to it.
+			if len(out) > 0 && trimmed != "" && isIndented(line) {
+				last := &out[len(out)-1]
+				if last.Line == i-1-len(last.Notes) {
+					last.Notes = append(last.Notes, trimmed)
+				}
+			}
 			continue
 		}
 		// Scheduling lives in the line itself; parsing is shared with the
@@ -205,6 +212,49 @@ func checkboxes(n *Note, loc *time.Location) []Checkbox {
 			Due: meta.Due, HasDue: meta.HasDue,
 			RemindAt: meta.RemindAt, HasRemind: meta.HasRemind,
 		})
+	}
+	return out
+}
+
+// isIndented reports whether a line is a continuation of the list item above
+// it rather than a new block.
+func isIndented(line string) bool {
+	return strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
+}
+
+// section returns the non-blank lines under a heading, with list markers left
+// as written.
+func section(n *Note, heading string) []string {
+	want := strings.ToLower(strings.TrimSpace(heading))
+	start := -1
+	for i := n.FrontEndIdx + 1; i < len(n.Lines); i++ {
+		trimmed := strings.TrimSpace(n.Lines[i])
+		if !strings.HasPrefix(trimmed, "#") {
+			continue
+		}
+		name := strings.ToLower(strings.TrimSpace(strings.TrimLeft(trimmed, "#")))
+		if start < 0 && name == want {
+			start = i
+			continue
+		}
+		if start >= 0 {
+			break
+		}
+	}
+	if start < 0 {
+		return nil
+	}
+	var out []string
+	for i := start + 1; i < len(n.Lines); i++ {
+		trimmed := strings.TrimSpace(n.Lines[i])
+		if strings.HasPrefix(trimmed, "#") {
+			break
+		}
+		// A lone "-" is the empty bullet these templates ship with.
+		if trimmed == "" || trimmed == "-" {
+			continue
+		}
+		out = append(out, strings.TrimPrefix(trimmed, "- "))
 	}
 	return out
 }
@@ -355,6 +405,7 @@ func readLocalTask(path string, loc *time.Location) (LocalTask, bool) {
 		Done:       strings.EqualFold(field(n.Front, "status"), "done"),
 		Path:       path,
 		Checkboxes: checkboxes(n, loc),
+		Notes:      section(n, "Notes"),
 	}
 	lt.Due, lt.HasDue = parseDate(n.Front["due"], loc)
 	return lt, true
@@ -379,6 +430,7 @@ func readTicket(path string, loc *time.Location, archived bool) (Ticket, bool) {
 		Path:       path,
 		Archived:   archived,
 		Checkboxes: checkboxes(n, loc),
+		Notes:      section(n, "Work Log / Updates"),
 	}
 	if t.Key == "" && t.Summary == "" {
 		// Not a ticket note (a stray README, a scratch file).

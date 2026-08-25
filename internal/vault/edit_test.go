@@ -208,3 +208,67 @@ func asStale(err error, target *ErrStale) bool {
 	}
 	return false
 }
+
+func TestAppendNoteUnderCheckbox(t *testing.T) {
+	path := tempNote(t, ticketNote)
+	if err := AppendNoteUnderCheckbox(path, 9, "open one", "spoke to the DS team"); err != nil {
+		t.Fatal(err)
+	}
+	got := lines(t, path)
+	for i, l := range got {
+		if l == "- [ ] open one" {
+			if got[i+1] != "  spoke to the DS team" {
+				t.Fatalf("note landed as %q, want an indented line under the task", got[i+1])
+			}
+			return
+		}
+	}
+	t.Fatal("the task line vanished")
+}
+
+// Notes accumulate in the order written; a new one must not jump the queue.
+func TestNotesUnderACheckboxAccumulateInOrder(t *testing.T) {
+	path := tempNote(t, ticketNote)
+	for _, n := range []string{"first", "second", "third"} {
+		if err := AppendNoteUnderCheckbox(path, 9, "open one", n); err != nil {
+			t.Fatal(err)
+		}
+	}
+	body := read(t, path)
+	fi, si, ti := strings.Index(body, "first"), strings.Index(body, "second"), strings.Index(body, "third")
+	if !(fi < si && si < ti) {
+		t.Errorf("notes are out of order:\n%s", body)
+	}
+}
+
+// The following task must not absorb the note.
+func TestNoteDoesNotLeakIntoTheNextTask(t *testing.T) {
+	path := tempNote(t, ticketNote)
+	if err := AppendNoteUnderCheckbox(path, 8, "done one", "about the first"); err != nil {
+		t.Fatal(err)
+	}
+	got := lines(t, path)
+	var noteAt, nextTaskAt int
+	for i, l := range got {
+		if strings.Contains(l, "about the first") {
+			noteAt = i
+		}
+		if l == "- [ ] open one" {
+			nextTaskAt = i
+		}
+	}
+	if noteAt == 0 || nextTaskAt == 0 || noteAt > nextTaskAt {
+		t.Errorf("the note landed below the following task:\n%s", read(t, path))
+	}
+}
+
+func TestAppendNoteRefusesAStaleLine(t *testing.T) {
+	path := tempNote(t, ticketNote)
+	// A distinctive body: "x" would also match the checked task's own marker.
+	if err := AppendNoteUnderCheckbox(path, 9, "a different task", "unwanted note"); err == nil {
+		t.Fatal("expected a staleness error")
+	}
+	if strings.Contains(read(t, path), "unwanted note") {
+		t.Error("the note was written despite the mismatch")
+	}
+}

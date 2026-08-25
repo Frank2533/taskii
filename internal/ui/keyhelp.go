@@ -97,6 +97,7 @@ func (a App) keyReference() []keySection {
 		{"Tasks", []keyRow{
 			{"a", "add a task (type a ticket summary to attach one)"},
 			{"A", "add a subtask to the selected ticket"},
+			{"N", "add a note about the task or subtask"},
 			{"e", "edit the task or subtask under the cursor"},
 			{"space / enter", "toggle done"},
 			{"d", "delete"},

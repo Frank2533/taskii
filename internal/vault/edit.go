@@ -192,6 +192,77 @@ func parseCheckbox(trimmed string) (done bool, text string, ok bool) {
 	return false, "", false
 }
 
+// noteIndent is the continuation indent for a note written under a task line.
+//
+// Two spaces makes the text a lazy continuation of the list item, so Obsidian
+// renders it as part of that task rather than as a separate paragraph or, if a
+// bullet were used, as a sub-task.
+const noteIndent = "  "
+
+// AppendNoteUnderCheckbox writes a note block directly beneath a task line.
+//
+// A note about one subtask belongs attached to it, not in a section shared by
+// the whole note — which is why this exists rather than reusing
+// AppendUnderHeading.
+//
+// wantText is the task text the caller believes is on that line, and the write
+// is refused on a mismatch: these files are rewritten by other tools, and
+// attaching a note to whatever has since taken that line would be worse than
+// failing.
+func AppendNoteUnderCheckbox(path string, line int, wantText, note string) error {
+	note = strings.TrimSpace(note)
+	if note == "" {
+		return nil
+	}
+	lines, mode, err := readLines(path)
+	if err != nil {
+		return err
+	}
+	if line < 0 || line >= len(lines) {
+		return ErrStale{Detail: fmt.Sprintf("line %d is outside the note", line)}
+	}
+	_, gotText, ok := parseCheckbox(strings.TrimSpace(lines[line]))
+	if !ok {
+		return ErrStale{Detail: fmt.Sprintf("line %d is no longer a task line", line)}
+	}
+	if wantText != "" {
+		bare, _ := ParseTaskLine(gotText, nil)
+		if bare != wantText && gotText != wantText {
+			return ErrStale{Detail: fmt.Sprintf("line %d now reads %q", line, bare)}
+		}
+	}
+
+	// Land after any note block already there, so notes accumulate in the
+	// order they were written instead of the newest jumping the queue.
+	insert := line + 1
+	for insert < len(lines) {
+		trimmed := strings.TrimSpace(lines[insert])
+		if trimmed == "" || !isIndentedLine(lines[insert]) {
+			break
+		}
+		if _, _, isTask := parseCheckbox(trimmed); isTask {
+			break
+		}
+		insert++
+	}
+
+	block := make([]string, 0, 2)
+	for _, l := range strings.Split(note, "\n") {
+		block = append(block, noteIndent+strings.TrimSpace(l))
+	}
+
+	out := make([]string, 0, len(lines)+len(block))
+	out = append(out, lines[:insert]...)
+	out = append(out, block...)
+	out = append(out, lines[insert:]...)
+	return writeLines(path, out, mode)
+}
+
+// isIndentedLine reports whether a line continues the list item above it.
+func isIndentedLine(line string) bool {
+	return strings.HasPrefix(line, " ") || strings.HasPrefix(line, "\t")
+}
+
 // SetProperty sets a top-level frontmatter key, adding it if absent.
 //
 // Only scalar keys are handled; a key whose value spans following lines (a

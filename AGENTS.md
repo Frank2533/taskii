@@ -935,3 +935,22 @@ the common case is a reminder later the same day, and a box showing "0" has its
 leading zero replaced by the first digit typed rather than appended to. The
 offset is echoed back in words with the resulting date and time, so what is
 about to be set is legible before it is committed.
+
+### Notes on tasks
+
+- **Three destinations, because a note means different things.** A note on one
+  subtask belongs attached to that line; a note on a ticket belongs in its work
+  log, the one section jira-sync does not rewrite; a note on a local task
+  belongs in the body of its own note.
+- **Subtask notes are indented two spaces**, making them a lazy continuation of
+  the list item. A bullet would render as a sub-task instead, and no indent
+  would make it a separate paragraph.
+- **New notes land after any block already there**, so they accumulate in the
+  order written rather than the newest jumping the queue, and the write stops
+  at the next task line so a note cannot leak onto its neighbour.
+- **The Notes pane follows the task cursor** and returns to the day's board when
+  focus leaves the task lists. One pane rather than two: notes about a task and
+  notes about the day are both notes, and are never wanted at the same moment.
+- **Notes need somewhere in the vault to live.** With Obsidian sync off, the
+  pane says the task is unsynced and the key refuses, rather than accepting text
+  it would silently discard.

@@ -55,6 +55,8 @@ const (
 	modeAddEvent
 	// modeEditEvent edits the selected calendar event.
 	modeEditEvent
+	// modeTaskNote adds a note about the task or subtask under the cursor.
+	modeTaskNote
 )
 
 const dateFormat = "2006-01-02"
@@ -180,6 +182,9 @@ type App struct {
 
 	// editingEvent is the id of the event being edited.
 	editingEvent string
+
+	// noteFor is where an in-progress task note will be written.
+	noteFor noteTarget
 
 	// scope is a pending change to a recurring event, waiting on the user to
 	// say how much of the series it applies to.
@@ -458,6 +463,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.updateAddEvent(msg)
 		case modeEditEvent:
 			return a.updateEditEvent(msg)
+		case modeTaskNote:
+			return a.updateTaskNote(msg)
 		case modeAdding:
 			return a.updateAdding(msg)
 		case modeConfirmDelete:
@@ -917,6 +924,11 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 		return a, nil
 
+	case "N":
+		// Notes about work, as opposed to the day's notes board, which keeps
+		// its own key on its own pane.
+		return a.beginTaskNote()
+
 	case "D":
 		// A picker, because typing a token per task is more ceremony than it
 		// is worth when you are triaging a list.
@@ -1119,6 +1131,22 @@ func (a App) renderNotesPane(g geometry) string {
 	contentWidth := g.notesWidth - 4
 	if contentWidth < 1 {
 		contentWidth = 1
+	}
+
+	// While a task list has focus the pane follows the cursor and shows that
+	// item's notes; it returns to the day's board as soon as focus moves
+	// away. One pane, because notes about a task and notes about the day are
+	// both notes and are never wanted at the same moment.
+	if target := a.noteTarget(); target.kind != noteTargetNone {
+		body := a.renderTaskNotes(target, contentWidth, g.notesHeight-2)
+		if a.mode == modeTaskNote {
+			body += "\n" + a.renderTaskNoteInput(contentWidth)
+		}
+		title := "Notes — " + target.name
+		if target.kind == noteTargetUnsynced {
+			title = "Notes — " + target.name + " (not synced)"
+		}
+		return renderPane(fitToWidth(title, g.notesWidth-4), body, false, g.notesWidth, g.notesHeight)
 	}
 
 	body := renderNotes(a.notes, a.notesSelected, a.notesScroll,
@@ -1955,6 +1983,9 @@ func (a App) helpGroups() []helpGroup {
 			}},
 		}
 	}
+	if a.mode == modeTaskNote {
+		return []helpGroup{{"", []helpKey{{"enter", "save note"}, {"esc", "cancel"}}}}
+	}
 	if a.focus == focusNotes {
 		notesKeys := []helpKey{
 			{"a", "add"}, {"enter", "edit"}, {"d", "delete"}, {"C", "clear board"},
@@ -2002,6 +2033,7 @@ func (a App) helpGroups() []helpGroup {
 	if a.focus == focusToday {
 		taskKeys = append(taskKeys, helpKey{"A", "subtask"}, helpKey{"z", "fold"})
 	}
+	taskKeys = append(taskKeys, helpKey{"N", "note"})
 
 	return []helpGroup{
 		{"Task", taskKeys},

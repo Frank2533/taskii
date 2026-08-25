@@ -39,6 +39,11 @@ type Checkbox struct {
 
 	RemindAt  time.Time
 	HasRemind bool
+
+	// Notes is the indented text block written under this task line, which is
+	// where a note about one subtask belongs: attached to it, rather than in a
+	// section shared by the whole note.
+	Notes []string
 }
 
 // Ticket is one note in Tickets/ or Archive/<Area>/, mirroring a Jira issue.
@@ -62,6 +67,11 @@ type Ticket struct {
 	Path       string // absolute
 	Archived   bool   // lives under Archive/
 	Checkboxes []Checkbox
+
+	// Notes is the ticket's freeform work log. jira-sync rewrites its own
+	// sections wholesale on every fetch, so this is the one place a note can
+	// be kept on a ticket without being lost at the next sync.
+	Notes []string
 }
 
 // Closed reports whether the ticket's status is one the archive automation
@@ -118,6 +128,9 @@ type LocalTask struct {
 	HasDue bool
 
 	Checkboxes []Checkbox
+
+	// Notes is the body of the task's own note.
+	Notes []string
 }
 
 // Area is one ongoing responsibility, one folder under Areas/.

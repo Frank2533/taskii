@@ -217,6 +217,7 @@ the coming Friday.
 | Key | Action |
 |---|---|
 | `a` / `A` | add a task / add a subtask to the selected ticket |
+| `N` | add a note about the task or subtask under the cursor |
 | `e` | edit the task or subtask under the cursor |
 | `space` `enter` | toggle done |
 | `D` | deadline and reminder picker (`c` for a custom offset) |
@@ -284,6 +285,21 @@ on every fetch, so anything put there is lost at the next sync.
 
 taskii moves its own notes rather than relying on Obsidian's note-mover plugins,
 whose rules are typically scoped to the tickets folder and would never see them.
+
+### Notes on tasks
+
+`N` adds a note about whatever the cursor is on, and the Notes pane follows the
+selection while a task list has focus, returning to the day's board when focus
+moves away. Where the note lands depends on what it is about:
+
+| Selection | Written to |
+|---|---|
+| a subtask | an indented block directly under that task line |
+| a ticket | the ticket's `## Work Log / Updates`, dated |
+| a local task | the body of that task's own note, dated |
+
+A note about one subtask belongs attached to it rather than in a section shared
+by the whole note, which is why the three differ.
 
 ### Task line syntax
 

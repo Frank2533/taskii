@@ -10,6 +10,8 @@ import (
 	"time"
 
 	"gopkg.in/yaml.v3"
+
+	"taskii/internal/vault"
 )
 
 // Folder names that carry meaning in a PARA vault.
@@ -180,7 +182,7 @@ func parseDate(v any, loc *time.Location) (time.Time, bool) {
 
 // checkboxes extracts every task line in the body, tagged with the heading it
 // sits under.
-func checkboxes(n *Note) []Checkbox {
+func checkboxes(n *Note, loc *time.Location) []Checkbox {
 	var out []Checkbox
 	heading := ""
 	start := n.FrontEndIdx + 1
@@ -195,7 +197,14 @@ func checkboxes(n *Note) []Checkbox {
 		if !ok {
 			continue
 		}
-		out = append(out, Checkbox{Line: i, Done: done, Text: text, Heading: heading})
+		// Scheduling lives in the line itself; parsing is shared with the
+		// writer so the two can never disagree about the format.
+		bare, meta := vault.ParseTaskLine(text, loc)
+		out = append(out, Checkbox{
+			Line: i, Done: done, Text: bare, Heading: heading,
+			Due: meta.Due, HasDue: meta.HasDue,
+			RemindAt: meta.RemindAt, HasRemind: meta.HasRemind,
+		})
 	}
 	return out
 }
@@ -345,7 +354,7 @@ func readLocalTask(path string, loc *time.Location) (LocalTask, bool) {
 		Title:      title,
 		Done:       strings.EqualFold(field(n.Front, "status"), "done"),
 		Path:       path,
-		Checkboxes: checkboxes(n),
+		Checkboxes: checkboxes(n, loc),
 	}
 	lt.Due, lt.HasDue = parseDate(n.Front["due"], loc)
 	return lt, true
@@ -369,7 +378,7 @@ func readTicket(path string, loc *time.Location, archived bool) (Ticket, bool) {
 		Link:       field(n.Front, "link"),
 		Path:       path,
 		Archived:   archived,
-		Checkboxes: checkboxes(n),
+		Checkboxes: checkboxes(n, loc),
 	}
 	if t.Key == "" && t.Summary == "" {
 		// Not a ticket note (a stray README, a scratch file).
@@ -395,7 +404,7 @@ func readProject(path string, loc *time.Location) (Project, bool) {
 		Status:     field(n.Front, "status"),
 		JiraEpic:   field(n.Front, "jira_epic"),
 		Path:       path,
-		Checkboxes: checkboxes(n),
+		Checkboxes: checkboxes(n, loc),
 	}
 	p.Target, p.HasTarget = parseDate(n.Front["target_date"], loc)
 	return p, true

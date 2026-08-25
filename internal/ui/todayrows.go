@@ -5,6 +5,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"taskii/internal/deadline"
 	"taskii/internal/model"
 	"taskii/internal/para"
 	"taskii/internal/vault"
@@ -142,7 +143,11 @@ func (a App) renderSubtaskLine(r todayRow, selected bool, width int) string {
 		prefix = "  > "
 		style = style.Background(colorPanel).Bold(true)
 	}
-	return style.Render(fitToWidth(prefix+box+" "+r.sub.Text, width))
+	label := r.sub.Text
+	if r.sub.HasDue {
+		label += "  ⌛ " + deadline.Short(r.sub.Due, a.now())
+	}
+	return style.Render(fitToWidth(prefix+box+" "+label, width))
 }
 
 // toggleTodayRow flips whatever the cursor is on: a subtask writes through to

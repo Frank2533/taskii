@@ -176,6 +176,10 @@ type App struct {
 	// showKeys is the "all bindings" overlay.
 	showKeys bool
 
+	// needsReindex marks that an action wrote to a note and the index is now
+	// behind.
+	needsReindex bool
+
 	// Raw persisted setting values, kept verbatim so an empty string keeps
 	// meaning "derive this" rather than being frozen into whatever was
 	// derived at startup.

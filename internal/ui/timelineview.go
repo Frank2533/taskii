@@ -105,6 +105,25 @@ func (a App) timelineItems() (items []timelineItem, anytime int) {
 		})
 	}
 
+	// A subtask carries its own deadline in its line, so it belongs on the
+	// timeline in its own right rather than being folded into its ticket.
+	if a.idx != nil {
+		for _, tk := range a.idx.Tickets {
+			for _, c := range tk.Checkboxes {
+				if c.Done || !c.HasDue {
+					continue
+				}
+				due := c.Due.In(now.Location())
+				if !inToday(due) {
+					continue
+				}
+				items = append(items, timelineItem{
+					at: due, kind: tlDeadline, text: c.Text, late: now.After(due),
+				})
+			}
+		}
+	}
+
 	// Vault tickets due today are deadlines too; they carry a date but no
 	// clock time, so they land at the end of the day.
 	if a.idx != nil {

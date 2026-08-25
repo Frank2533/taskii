@@ -832,3 +832,28 @@ expected order and the one the worklog flush already follows.
 - **Ticket notes go to the work-log section.** The `jira-sync-section-*` blocks
   are rewritten wholesale on every fetch, so anything written there is lost at
   the next sync.
+
+### Events, calendar scales, and task scheduling in the line
+
+- **An event is not an appointment-kind task.** A task is work to finish and
+  can be ticked off; an event is time that is spoken for whether or not
+  anything is done in it. Parsing refuses an event with no time range, so the
+  two cannot blur together.
+- **Repeats expand on demand**, capped, so an unbounded daily event cannot spin
+  when asked for an implausible range. Export emits one VEVENT with an RRULE
+  rather than the expansion, so a subscriber keeps the series.
+- **Day cells report what they cannot show.** A cell showing two of five items
+  and saying nothing about the rest reads as a complete list, hence "+N more".
+  Neighbouring-month days are drawn empty rather than omitted so the weekday
+  columns stay aligned. The year scale answers "when is it busy" with counts,
+  because no cell there can hold an item's text.
+- **Subtask scheduling lives in the task line**, in the conventions Obsidian
+  plugins already read: `📅 YYYY-MM-DD` for the due date and
+  `(@YYYY-MM-DD HH:mm)` for the reminder, which carries a time of day the due
+  date cannot. Parsing is shared between the reader and the writer so the two
+  can never disagree about the format, and `Checkbox.Text` is the bare text, so
+  editing a task never has to step around its own metadata.
+- **The timeline sizes itself to the day.** A fixed cap left it at three hours
+  while the column beside it was empty. It is still capped at half of what it
+  shares with the Notes board, because a busy day would otherwise push the
+  board to its floor every time.

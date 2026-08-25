@@ -436,3 +436,79 @@ func TestNothingIsWrittenWhenSyncIsOff(t *testing.T) {
 		t.Error("a note was written despite sync being disabled")
 	}
 }
+
+// A subtask's deadline belongs in the note, written the way Obsidian plugins
+// read it — otherwise it would exist only inside taskii while the task it
+// belongs to lives in the vault.
+func TestSubtaskDeadlineIsWrittenIntoTheNote(t *testing.T) {
+	a, root := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "normalize")
+	a = press(t, a, "down", "enter")
+
+	a.todaySelected = 2 // the second subtask
+	a = press(t, a, "D")
+	if !a.picker.open {
+		t.Fatal("picker did not open on a subtask")
+	}
+	next, cmd := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("m")}) // tomorrow
+	a = next.(App)
+	if a.err != "" {
+		t.Fatalf("picker reported: %s", a.err)
+	}
+	if cmd == nil {
+		t.Error("writing to a note should reindex")
+	}
+
+	body, err := os.ReadFile(filepath.Join(root, "Tickets", "AAA-1 In Progress live.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := a.now().AddDate(0, 0, 1).Format("2006-01-02")
+	if !strings.Contains(string(body), "📅 "+want) {
+		t.Errorf("deadline not written in Tasks syntax:\n%s", body)
+	}
+	if !strings.Contains(string(body), "- [ ] check zepto spider 📅") {
+		t.Errorf("the token did not attach to the right task:\n%s", body)
+	}
+}
+
+// The index reads the token back, so the deadline shows in both views.
+func TestSubtaskDeadlineIsReadBackAndShown(t *testing.T) {
+	a, root := dashApp(t)
+	notePath := filepath.Join(root, "Tickets", "AAA-1 In Progress live.md")
+	body, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	due := a.now().AddDate(0, 0, 1).Format("2006-01-02")
+	updated := strings.Replace(string(body), "- [ ] check zepto spider",
+		"- [ ] check zepto spider 📅 "+due, 1)
+	if err := os.WriteFile(notePath, []byte(updated), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	idx, err := para.Scan(root, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tk, _ := idx.Ticket("AAA-1")
+	var found bool
+	for _, c := range tk.Checkboxes {
+		if c.Text == "check zepto spider" {
+			found = true
+			if !c.HasDue {
+				t.Error("the deadline token was not read back")
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("the token was left in the task text: %+v", tk.Checkboxes)
+	}
+
+	m, _ := a.Update(indexMsg{idx: idx})
+	app := press(t, m.(App), "2", "tab", "tab")
+	if !strings.Contains(app.View(), "tomorrow") {
+		t.Errorf("the subtask deadline is not shown in the PARA view:\n%s", app.View())
+	}
+}

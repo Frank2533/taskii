@@ -24,10 +24,21 @@ var closedStatuses = map[string]bool{
 // Checkbox is one "- [ ]" line in a note body, remembered with its line number
 // so a toggle can rewrite exactly that line instead of the whole file.
 type Checkbox struct {
-	Line    int // 0-based index into the file's lines
-	Done    bool
+	Line int // 0-based index into the file's lines
+	Done bool
+	// Text is what the user wrote, with any scheduling tokens removed, so a
+	// task never has to be edited around its own metadata.
 	Text    string
 	Heading string // the "## ..." section it sits under, "" if none
+
+	// Due and RemindAt are read from the line's own tokens, so a deadline set
+	// in taskii is a deadline in the vault rather than a fact only taskii
+	// knows.
+	Due    time.Time
+	HasDue bool
+
+	RemindAt  time.Time
+	HasRemind bool
 }
 
 // Ticket is one note in Tickets/ or Archive/<Area>/, mirroring a Jira issue.

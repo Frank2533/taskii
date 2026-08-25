@@ -8,6 +8,7 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"taskii/internal/deadline"
+	"taskii/internal/vault"
 )
 
 // deadlinePicker is the one-keystroke way to set a deadline, for when typing a
@@ -25,8 +26,16 @@ func (a *App) applyDeadline(due *time.Time, remind *time.Duration) bool {
 	var id string
 	switch a.focus {
 	case focusToday:
-		if a.todaySelected >= 0 && a.todaySelected < len(rows) && !rows[a.todaySelected].isSub {
-			id = rows[a.todaySelected].task.ID
+		if a.todaySelected >= 0 && a.todaySelected < len(rows) {
+			r := rows[a.todaySelected]
+			if r.isSub {
+				// A subtask's schedule belongs in the note, written in the
+				// conventions Obsidian plugins already read — otherwise the
+				// deadline would exist only inside taskii while the task it
+				// belongs to lives in the vault.
+				return a.applySubtaskDeadline(r, due, remind)
+			}
+			id = r.task.ID
 		}
 	case focusOverdue:
 		list := a.overdueTasks()
@@ -60,6 +69,30 @@ func (a *App) applyDeadline(due *time.Time, remind *time.Duration) bool {
 	return false
 }
 
+// applySubtaskDeadline writes a subtask's schedule into its own task line.
+func (a *App) applySubtaskDeadline(r todayRow, due *time.Time, remind *time.Duration) bool {
+	meta := vault.TaskMeta{
+		Due: r.sub.Due, HasDue: r.sub.HasDue,
+		RemindAt: r.sub.RemindAt, HasRemind: r.sub.HasRemind,
+	}
+	if due != nil {
+		meta.Due, meta.HasDue = *due, true
+	} else if remind == nil {
+		// Clearing: a bare "clear" removes both, since the picker offers no
+		// way to clear them separately.
+		meta = vault.TaskMeta{}
+	}
+	if remind != nil {
+		meta.RemindAt, meta.HasRemind = a.now().Add(*remind), true
+	}
+	if err := vault.SetTaskSchedule(r.ticketPath, r.sub.Line, r.sub.Text, meta, a.loc); err != nil {
+		a.err = err.Error()
+		return false
+	}
+	a.needsReindex = true
+	return true
+}
+
 // updateDeadlinePicker maps one keystroke to a deadline.
 func (a App) updateDeadlinePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	now := a.now()
@@ -73,7 +106,7 @@ func (a App) updateDeadlinePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.applyDeadline(nil, nil)
 		a.picker.open = false
 		a.status = "deadline cleared"
-		return a, nil
+		return a, a.reindexIfNeeded()
 	case "t":
 		return a.setPickerDue(deadline.InDays(now, 0), "today")
 	case "m":
@@ -85,7 +118,7 @@ func (a App) updateDeadlinePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.applyDeadline(nil, &d)
 		a.picker.open = false
 		a.status = "reminder in 1 hour"
-		return a, nil
+		return a, a.reindexIfNeeded()
 	}
 
 	// 1..9 set a deadline that many days out; 0 is today.
@@ -101,7 +134,17 @@ func (a App) setPickerDue(due time.Time, label string) (tea.Model, tea.Cmd) {
 		a.status = "due " + label
 	}
 	a.picker.open = false
-	return a, nil
+	return a, a.reindexIfNeeded()
+}
+
+// reindexIfNeeded rebuilds the index when the last action wrote to a note, so
+// the two views agree about what is in it.
+func (a *App) reindexIfNeeded() tea.Cmd {
+	if !a.needsReindex {
+		return nil
+	}
+	a.needsReindex = false
+	return loadIndex(a.vaultPath, a.loc)
 }
 
 func (a App) renderDeadlinePicker() string {

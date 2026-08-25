@@ -6,6 +6,7 @@ import (
 
 	"github.com/charmbracelet/lipgloss"
 
+	"taskii/internal/deadline"
 	"taskii/internal/para"
 )
 
@@ -467,7 +468,11 @@ func (a App) renderDetail(width, height int) string {
 					style = style.Foreground(colorAccent).Bold(true)
 				}
 			}
-			add(style.Render(fitToWidth(prefix+box+" "+c.Text, width)))
+			label := c.Text
+			if c.HasDue {
+				label += "  ⌛ " + deadline.Short(c.Due, a.now())
+			}
+			add(style.Render(fitToWidth(prefix+box+" "+label, width)))
 		}
 	}
 	return strings.Join(out, "\n")

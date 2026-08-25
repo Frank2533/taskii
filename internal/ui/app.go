@@ -13,6 +13,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
 
+	"taskii/internal/deadline"
 	"taskii/internal/model"
 	"taskii/internal/obsidian"
 	"taskii/internal/para"
@@ -1078,6 +1079,15 @@ func (a *App) addTask(raw string) {
 		return
 	}
 
+	// Deadline tokens are stripped before anything else, so "!tmr" never ends
+	// up in the title and never gets mistaken for the trailing clock time
+	// that marks an appointment.
+	raw, spec := deadline.Parse(raw, a.now())
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return
+	}
+
 	title := raw
 	taskTime := ""
 	kind := model.KindTask
@@ -1102,6 +1112,14 @@ func (a *App) addTask(raw string) {
 		Date:      a.now().Format(dateFormat),
 		Time:      taskTime,
 		CreatedAt: a.now(),
+	}
+	if spec.HasDue {
+		due := spec.Due
+		t.Due = &due
+	}
+	if spec.HasRemind {
+		at := spec.RemindAt
+		t.RemindAt = &at
 	}
 
 	a.tasks = append(a.tasks, t)
@@ -1488,15 +1506,30 @@ func (a App) todayTasks() []model.Task {
 	return a.applyFilters(out)
 }
 
+// overdueTasks collects both kinds of late work: a task carried over from an
+// earlier day, and a task whose deadline has passed regardless of which day it
+// is filed under. Missed deadlines sort first — they are the stronger claim on
+// attention, and a task due today can be late while still belonging to today.
 func (a App) overdueTasks() []model.Task {
-	today := a.now().Format(dateFormat)
+	now := a.now()
+	today := now.Format(dateFormat)
 	var out []model.Task
 	for _, t := range a.tasks {
-		if t.Date < today && !t.Done {
+		if t.Done {
+			continue
+		}
+		if t.Date < today || t.PastDue(now) {
 			out = append(out, t)
 		}
 	}
 	sort.SliceStable(out, func(i, j int) bool {
+		li, lj := out[i].PastDue(now), out[j].PastDue(now)
+		if li != lj {
+			return li
+		}
+		if li && lj && !out[i].Deadline().Equal(out[j].Deadline()) {
+			return out[i].Deadline().Before(out[j].Deadline())
+		}
 		return out[i].Date < out[j].Date
 	})
 	return a.applyFilters(out)
@@ -1743,7 +1776,7 @@ func (a App) View() string {
 
 	today := a.todayTasks()
 	todayVisible := a.visibleRowsFor(focusToday)
-	todayBody := renderTaskList(today, a.todaySelected, a.todayScroll, todayVisible, a.focus == focusToday, false, leftWidth-4)
+	todayBody := renderTaskList(decorateDeadlines(today, a.now()), a.todaySelected, a.todayScroll, todayVisible, a.focus == focusToday, false, leftWidth-4)
 	if a.mode == modeAdding {
 		// Set here rather than once in NewApp so these follow theme changes.
 		a.input.TextStyle = lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
@@ -1787,7 +1820,7 @@ func (a App) View() string {
 	// Today and Overdue are stacked at the same width.
 	overdueWidth := leftWidth
 	overdueVisible := a.visibleRowsFor(focusOverdue)
-	overdueBody := renderTaskList(overdue, a.overdueSelected, a.overdueScroll, overdueVisible, a.focus == focusOverdue, true, overdueWidth-4)
+	overdueBody := renderTaskList(decorateDeadlines(overdue, a.now()), a.overdueSelected, a.overdueScroll, overdueVisible, a.focus == focusOverdue, true, overdueWidth-4)
 	overduePane := renderPane(fmt.Sprintf("Overdue (%d)%s", len(overdue), filters), overdueBody, a.focus == focusOverdue, overdueWidth, overdueHeight)
 
 	tasks := lipgloss.JoinVertical(lipgloss.Left, todayPane, overduePane)

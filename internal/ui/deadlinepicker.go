@@ -11,6 +11,9 @@ import (
 	"taskii/internal/vault"
 )
 
+// pickerWidth fits the longest row with room to spare.
+const pickerWidth = 52
+
 // deadlinePicker is the one-keystroke way to set a deadline, for when typing a
 // token per task is more ceremony than it is worth.
 type deadlinePicker struct {
@@ -149,6 +152,59 @@ func (a *App) reindexIfNeeded() tea.Cmd {
 	return loadIndex(a.vaultPath, a.loc)
 }
 
+// selectionSchedule describes what the cursor is on and what is already set
+// on it.
+//
+// The picker previously showed only the key list, so the line beneath it was
+// whatever the last action happened to leave in the status bar — which read as
+// the selected task's reminder while belonging to something else entirely.
+func (a App) selectionSchedule() (name, current string) {
+	now := a.now()
+
+	if a.focus == focusToday {
+		rows := a.todayRows()
+		if a.todaySelected >= 0 && a.todaySelected < len(rows) {
+			r := rows[a.todaySelected]
+			if r.isSub {
+				return r.sub.Text, describeSchedule(
+					r.sub.Due, r.sub.HasDue, r.sub.RemindAt, r.sub.HasRemind, now)
+			}
+		}
+	}
+
+	t := a.selectedTask()
+	if t == nil {
+		return "", "nothing selected"
+	}
+	remind := time.Time{}
+	if t.RemindAt != nil {
+		remind = *t.RemindAt
+	}
+	return t.Title, describeSchedule(t.Deadline(), t.HasDue(), remind, t.RemindAt != nil, now)
+}
+
+// describeSchedule renders the deadline and reminder already set.
+func describeSchedule(due time.Time, hasDue bool, remind time.Time, hasRemind bool, now time.Time) string {
+	var parts []string
+	if hasDue {
+		parts = append(parts, "due "+deadline.Short(due, now))
+	}
+	if hasRemind {
+		when := "at " + remind.Format("15:04")
+		if remind.YearDay() != now.YearDay() || remind.Year() != now.Year() {
+			when = "at " + remind.Format("Mon 02 Jan 15:04")
+		}
+		if remind.Before(now) {
+			when += " (passed)"
+		}
+		parts = append(parts, "reminder "+when)
+	}
+	if len(parts) == 0 {
+		return "no deadline or reminder set"
+	}
+	return strings.Join(parts, "  ·  ")
+}
+
 func (a App) renderDeadlinePicker() string {
 	muted := lipgloss.NewStyle().Foreground(colorMuted).Background(colorPaneBg)
 	text := lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
@@ -157,7 +213,15 @@ func (a App) renderDeadlinePicker() string {
 	row := func(k, label string) string {
 		return key.Render("  "+k+"  ") + text.Render(label)
 	}
+	name, current := a.selectionSchedule()
+	header := muted.Render("  " + current)
+	if name != "" {
+		header = text.Render(fitToWidth("  "+name, pickerWidth-4)) + "\n" + muted.Render("  "+current)
+	}
+
 	lines := []string{
+		header,
+		"",
 		muted.Render("  Deadline"),
 		row("t", "today"),
 		row("m", "tomorrow"),
@@ -171,6 +235,6 @@ func (a App) renderDeadlinePicker() string {
 		"",
 		muted.Render("  esc  cancel"),
 	}
-	width := 34
-	return renderPane("Set deadline", strings.Join(lines, "\n"), true, width, len(lines)+2)
+	// Wide enough that the longest row is not clipped, which it was at 34.
+	return renderPane("Set deadline", strings.Join(lines, "\n"), true, pickerWidth, lipgloss.Height(strings.Join(lines, "\n"))+2)
 }

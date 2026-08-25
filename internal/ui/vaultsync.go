@@ -102,6 +102,39 @@ func (a *App) archiveLocalTask(t *model.Task) {
 	a.persist()
 }
 
+// retireDeletedTask takes a deleted task's note out of circulation.
+//
+// The note is moved to the archive and marked deleted rather than removed from
+// disk. Deleting a task in taskii is a one-keystroke action, while the note may
+// carry subtasks and notes written in Obsidian that taskii never saw — losing
+// those to a keystroke would be a poor trade for tidiness. The move is what
+// matters: an archived note no longer appears among the open local tasks.
+func (a *App) retireDeletedTask(t model.Task) {
+	if !a.syncEnabled() || t.ID == "" || t.IsTicket() {
+		return
+	}
+	path := t.NotePath
+	if path == "" {
+		found, err := vault.FindNoteByID(a.projectDir(), t.ID)
+		if err != nil {
+			a.err = "vault sync: " + err.Error()
+			return
+		}
+		path = found
+	}
+	if path == "" {
+		return
+	}
+	// Marked before the move so the status is right wherever it ends up, and
+	// so a note that fails to move still reads as deleted.
+	if err := vault.SetProperty(path, "status", "deleted"); err != nil {
+		a.err = "vault sync: " + err.Error()
+	}
+	if _, err := vault.ArchiveTaskNote(path, a.archiveDir()); err != nil {
+		a.err = "vault archive: " + err.Error()
+	}
+}
+
 // syncDailyNote writes the notes board to today's dated note.
 func (a *App) syncDailyNote() {
 	if !a.syncEnabled() {

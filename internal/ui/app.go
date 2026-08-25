@@ -922,6 +922,11 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		// is worth when you are triaging a list.
 		if a.focus == focusToday || a.focus == focusOverdue {
 			a.picker.open = true
+			// The status bar sits directly under the picker, so a message
+			// left there by an earlier action reads as belonging to the
+			// selection.
+			a.status = ""
+			a.err = ""
 		}
 		return a, nil
 
@@ -1655,12 +1660,19 @@ func (a App) saveSettings() {
 // selectedTask returns the task under the cursor in the focused pane, or nil
 // when the pane is empty (or the selection is somehow out of range).
 func (a *App) selectedTask() *model.Task {
-	list := a.currentList()
-	sel := a.currentSelected()
-	if sel < 0 || sel >= len(list) {
+	// By row, like every other action on these panes, and resolved against
+	// the stored slice rather than the filtered view so the pointer refers to
+	// the real task.
+	id := a.actionTaskID()
+	if id == "" {
 		return nil
 	}
-	return &list[sel]
+	for i := range a.tasks {
+		if a.tasks[i].ID == id {
+			return &a.tasks[i]
+		}
+	}
+	return nil
 }
 
 // updateConfirmDelete handles the y/n prompt shown before a delete. Anything
@@ -1687,19 +1699,29 @@ func (a App) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 }
 
 func (a *App) deleteSelected() {
-	list := a.currentList()
-	sel := a.currentSelected()
-	if sel < 0 || sel >= len(list) {
+	// Resolved by row, not by list position: Today addresses rows and an
+	// expanded ticket makes the two diverge, so an index would delete a
+	// different task than the one under the cursor.
+	id := a.actionTaskID()
+	if id == "" {
 		return
 	}
-	id := list[sel].ID
+	sel := a.currentSelected()
+
+	var removed model.Task
 	filtered := a.tasks[:0]
 	for _, t := range a.tasks {
 		if t.ID != id {
 			filtered = append(filtered, t)
+			continue
 		}
+		removed = t
 	}
 	a.tasks = filtered
+
+	// The note in the vault has to go too, or the task stays visible in the
+	// PARA view after being deleted here.
+	a.retireDeletedTask(removed)
 
 	newLen := len(a.currentList())
 	if sel >= newLen {

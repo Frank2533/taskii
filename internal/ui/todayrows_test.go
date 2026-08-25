@@ -512,3 +512,81 @@ func TestSubtaskDeadlineIsReadBackAndShown(t *testing.T) {
 		t.Errorf("the subtask deadline is not shown in the PARA view:\n%s", app.View())
 	}
 }
+
+// A deleted task must leave the PARA view too, not just the dashboard.
+func TestDeletingATaskRetiresItsNote(t *testing.T) {
+	a, root := dashApp(t)
+	a.noPersist = false
+	a.obsidianSync = true
+	a.projectFolder = "Projects"
+
+	a = press(t, a, "a")
+	a = typeInto(a, "buy oat milk")
+	a = press(t, a, "enter")
+
+	notePath := filepath.Join(root, "Projects", "buy oat milk.md")
+	if _, err := os.Stat(notePath); err != nil {
+		t.Fatalf("the note was never written: %v", err)
+	}
+
+	a.todaySelected = 0
+	a = press(t, a, "d") // delete asks first
+	a = press(t, a, "y")
+	if a.err != "" {
+		t.Fatalf("delete reported: %s", a.err)
+	}
+	if len(a.tasks) != 0 {
+		t.Fatalf("tasks = %d, want none", len(a.tasks))
+	}
+
+	if _, err := os.Stat(notePath); !os.IsNotExist(err) {
+		t.Error("the note is still in the working folder")
+	}
+	archived := filepath.Join(root, "Archive", "Local Tasks", "buy oat milk.md")
+	body, err := os.ReadFile(archived)
+	if err != nil {
+		t.Fatalf("the note was not archived: %v", err)
+	}
+	if !strings.Contains(string(body), "status: deleted") {
+		t.Errorf("the note is not marked deleted:\n%s", body)
+	}
+
+	// And it must no longer be listed among the open local tasks.
+	idx, err := para.Scan(root, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, lt := range idx.OpenLocalTasks() {
+		if strings.Contains(lt.Title, "buy oat milk") {
+			t.Errorf("the deleted task is still an open local task: %+v", lt)
+		}
+	}
+}
+
+// Delete resolves by row, so an expanded ticket cannot shift it onto a
+// different task.
+func TestDeleteResolvesByRowNotIndex(t *testing.T) {
+	a, _ := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "normalize")
+	a = press(t, a, "down", "enter") // a ticket, which expands two subtasks
+	a = press(t, a, "a")
+	a = typeInto(a, "keep me")
+	a = press(t, a, "enter")
+
+	rows := a.todayRows()
+	if len(rows) != 4 {
+		t.Fatalf("rows = %d, want ticket + 2 subtasks + 1 task", len(rows))
+	}
+	// The last row is "keep me"; by task index that position would be the
+	// ticket.
+	a.todaySelected = 3
+	a = press(t, a, "d", "y")
+
+	if len(a.tasks) != 1 {
+		t.Fatalf("tasks = %d, want 1", len(a.tasks))
+	}
+	if a.tasks[0].TicketKey != "AAA-1" {
+		t.Errorf("deleted the wrong task; left %+v", a.tasks[0])
+	}
+}

@@ -161,3 +161,71 @@ func readFile(t *testing.T, parts ...string) string {
 	}
 	return string(b)
 }
+
+// The picker must describe the selected item, not whatever the last action
+// left in the status bar.
+func TestPickerShowsTheSelectionsOwnSchedule(t *testing.T) {
+	a, _ := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "buy oat milk")
+	a = press(t, a, "enter")
+	a = press(t, a, "a")
+	a = typeInto(a, "call the bank !tmr")
+	a = press(t, a, "enter")
+
+	// Set a reminder on the first task, leaving a status message behind.
+	a.todaySelected = 0
+	a = press(t, a, "D", "h")
+	if a.status == "" {
+		t.Fatal("expected a status message from setting the reminder")
+	}
+
+	// Now open the picker on the other task.
+	a.todaySelected = 1
+	a = press(t, a, "D")
+	out := a.View()
+
+	if !strings.Contains(out, "call the bank") {
+		t.Errorf("the picker does not name the selection:\n%s", out)
+	}
+	if !strings.Contains(out, "due tomorrow") {
+		t.Errorf("the picker does not show the selection's deadline:\n%s", out)
+	}
+	if strings.Contains(out, "reminder in 1 hour") {
+		t.Errorf("the picker still shows the previous action's message:\n%s", out)
+	}
+}
+
+func TestPickerSaysWhenNothingIsSet(t *testing.T) {
+	a := taskWithPicker(t)
+	if !strings.Contains(a.View(), "no deadline or reminder set") {
+		t.Errorf("the picker does not report an empty schedule:\n%s", a.View())
+	}
+}
+
+// A subtask's own schedule is what should be described, not its ticket's.
+func TestPickerDescribesASubtasksSchedule(t *testing.T) {
+	a, _ := dashApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "normalize")
+	a = press(t, a, "down", "enter")
+
+	a.todaySelected = 2 // a subtask
+	a = press(t, a, "D", "m")
+	next, cmd := a.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("D")})
+	_ = cmd
+	a = next.(App)
+
+	out := a.View()
+	if !strings.Contains(out, "check zepto spider") {
+		t.Errorf("the picker does not name the subtask:\n%s", out)
+	}
+}
+
+// The longest row must not be clipped.
+func TestPickerRowsAreNotClipped(t *testing.T) {
+	a := taskWithPicker(t)
+	if !strings.Contains(a.View(), "days, hours, minutes") {
+		t.Errorf("a row is truncated:\n%s", a.View())
+	}
+}

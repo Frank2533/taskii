@@ -113,6 +113,10 @@ func parseDueToken(tok string, now time.Time) (time.Time, bool) {
 	case "w", "week", "eow":
 		return EndOfWeek(now), true
 	}
+	// An explicit date, which is what a stored deadline renders back to.
+	if d, err := time.ParseInLocation("2006-01-02", word, now.Location()); err == nil {
+		return EndOfDay(time.Date(d.Year(), d.Month(), d.Day(), 0, 0, 0, 0, now.Location())), true
+	}
 	if m := daysRe.FindStringSubmatch(tok); m != nil {
 		n, err := strconv.Atoi(m[1])
 		if err != nil {

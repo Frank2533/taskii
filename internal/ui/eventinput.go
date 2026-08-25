@@ -166,6 +166,154 @@ func parseEvent(text string, now time.Time) (model.Event, bool) {
 	}, true
 }
 
+// dayCodes name a weekday for the day-set syntax, Monday first.
+var dayCodes = map[time.Weekday]string{
+	time.Monday: "mon", time.Tuesday: "tue", time.Wednesday: "wed",
+	time.Thursday: "thu", time.Friday: "fri", time.Saturday: "sat", time.Sunday: "sun",
+}
+
+// formatEvent renders an event back into the syntax it was typed in.
+//
+// Editing reuses the same one-line grammar rather than a separate form: what
+// is shown for editing is exactly what would have created the event, so there
+// is nothing extra to learn and no second representation to keep in step.
+func formatEvent(e model.Event, now time.Time) string {
+	parts := []string{e.Title, e.Start.Format("15:04") + "-" + e.End.Format("15:04")}
+
+	// The date is only worth stating when it is not today, and a repeating
+	// event's date is implied by its rule.
+	if e.Repeat == model.RepeatNone && !sameDay(e.Start, now) {
+		parts = append(parts, "!"+e.Start.Format("2006-01-02"))
+	}
+
+	if len(e.Days) > 0 {
+		if isWeekdaySet(e.Days) {
+			parts = append(parts, "weekdays")
+		} else {
+			var names []string
+			for _, d := range model.SortWeekdays(e.Days) {
+				names = append(names, dayCodes[d])
+			}
+			parts = append(parts, strings.Join(names, ","))
+		}
+	} else if e.Repeat != model.RepeatNone {
+		parts = append(parts, string(e.Repeat))
+	}
+
+	if e.Interval > 1 {
+		parts = append(parts, "x"+strconv.Itoa(e.Interval))
+	}
+	return strings.Join(parts, " ")
+}
+
+func sameDay(a, b time.Time) bool {
+	ay, am, ad := a.Date()
+	by, bm, bd := b.Date()
+	return ay == by && am == bm && ad == bd
+}
+
+func isWeekdaySet(days []time.Weekday) bool {
+	if len(days) != len(model.Weekdays) {
+		return false
+	}
+	seen := map[time.Weekday]bool{}
+	for _, d := range days {
+		seen[d] = true
+	}
+	for _, d := range model.Weekdays {
+		if !seen[d] {
+			return false
+		}
+	}
+	return true
+}
+
+// beginEditEvent opens the input primed with the selected event.
+func (a App) beginEditEvent() (tea.Model, tea.Cmd) {
+	ev, ok := a.selectedEvent()
+	if !ok {
+		if _, onSomething := a.selectedEntry(); onSomething {
+			a.err = "only events are edited here — tasks and tickets are edited where they live"
+		} else {
+			a.err = "no event selected"
+		}
+		return a, nil
+	}
+	a.editingEvent = ev.ID
+	a.mode = modeEditEvent
+	a.input.SetValue(formatEvent(ev, a.now()))
+	a.input.Placeholder = "edit, then enter"
+	a.input.CursorEnd()
+	a.input.Focus()
+	return a, nil
+}
+
+// updateEditEvent drives the edit input.
+func (a App) updateEditEvent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
+	switch msg.String() {
+	case "esc":
+		a.mode = modeNormal
+		a.editingEvent = ""
+		a.input.Blur()
+		a.input.SetValue("")
+		return a, nil
+	case "enter":
+		text := a.input.Value()
+		id := a.editingEvent
+		a.mode = modeNormal
+		a.editingEvent = ""
+		a.input.Blur()
+		a.input.SetValue("")
+
+		parsed, ok := parseEvent(text, a.now())
+		if !ok {
+			a.err = "an event needs a time range, e.g. 09:30-10:00"
+			return a, nil
+		}
+		for i := range a.events {
+			if a.events[i].ID != id {
+				continue
+			}
+			// The identity is kept so the event stays the same entry in a
+			// subscriber's calendar rather than arriving as a new one, and so
+			// reminders already sent for it are still recognised as sent.
+			parsed.ID = id
+			a.events[i] = parsed
+			if !a.noPersist {
+				_ = model.SaveEvents(a.events)
+			}
+			a.status = "updated " + parsed.Title
+			return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc)
+		}
+		a.err = "that event no longer exists"
+		return a, nil
+	}
+	var cmd tea.Cmd
+	a.input, cmd = a.input.Update(msg)
+	return a, cmd
+}
+
+// deleteSelectedEvent removes the event under the cursor.
+func (a App) deleteSelectedEvent() (tea.Model, tea.Cmd) {
+	ev, ok := a.selectedEvent()
+	if !ok {
+		a.err = "no event selected"
+		return a, nil
+	}
+	out := a.events[:0:0]
+	for _, e := range a.events {
+		if e.ID != ev.ID {
+			out = append(out, e)
+		}
+	}
+	a.events = out
+	if !a.noPersist {
+		_ = model.SaveEvents(a.events)
+	}
+	a.status = "deleted " + ev.Title
+	return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc)
+}
+
 // beginAddEvent opens the event input.
 func (a App) beginAddEvent() (tea.Model, tea.Cmd) {
 	a.mode = modeAddEvent

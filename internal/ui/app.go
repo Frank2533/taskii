@@ -53,6 +53,8 @@ const (
 	modeAddSubtask
 	// modeAddEvent adds a calendar event.
 	modeAddEvent
+	// modeEditEvent edits the selected calendar event.
+	modeEditEvent
 )
 
 const dateFormat = "2006-01-02"
@@ -170,6 +172,11 @@ type App struct {
 	// anchored on.
 	calScale  calScale
 	calCursor time.Time
+	// calEntrySel is which of the selected day's entries the cursor is on.
+	calEntrySel int
+
+	// editingEvent is the id of the event being edited.
+	editingEvent string
 
 	// editing is what an in-progress edit applies to.
 	editing editTarget
@@ -436,6 +443,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.updateAddSubtask(msg)
 		case modeAddEvent:
 			return a.updateAddEvent(msg)
+		case modeEditEvent:
+			return a.updateEditEvent(msg)
 		case modeAdding:
 			return a.updateAdding(msg)
 		case modeConfirmDelete:
@@ -491,6 +500,10 @@ func (a App) updateCalendar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc)
 	case "a":
 		return a.beginAddEvent()
+	case "e":
+		return a.beginEditEvent()
+	case "d":
+		return a.deleteSelectedEvent()
 	case "w":
 		a.calScale = calWeek
 		return a, nil
@@ -502,23 +515,79 @@ func (a App) updateCalendar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	case "T":
 		a.calCursor = a.now()
+		a.calEntrySel = 0
 		return a, nil
-	case "left", "h", "up", "k":
+	case "tab":
+		// Step through what is on the selected day, which is how an entry is
+		// picked for editing.
+		if n := len(a.entriesOnSelectedDay()); n > 0 {
+			a.calEntrySel = (a.calEntrySel + 1) % n
+		}
+		return a, nil
+	case "shift+tab":
+		if n := len(a.entriesOnSelectedDay()); n > 0 {
+			a.calEntrySel = (a.calEntrySel + n - 1) % n
+		}
+		return a, nil
+	case "left", "h":
+		a.calCursor = a.shiftCalendarDay(-1)
+		a.calEntrySel = 0
+		return a, nil
+	case "right", "l":
+		a.calCursor = a.shiftCalendarDay(1)
+		a.calEntrySel = 0
+		return a, nil
+	case "up", "k":
+		a.calCursor = a.shiftCalendarRow(-1)
+		a.calEntrySel = 0
+		return a, nil
+	case "down", "j":
+		a.calCursor = a.shiftCalendarRow(1)
+		a.calEntrySel = 0
+		return a, nil
+	case "[":
 		a.calCursor = a.shiftCalendar(-1)
+		a.calEntrySel = 0
 		return a, nil
-	case "right", "l", "down", "j":
+	case "]":
 		a.calCursor = a.shiftCalendar(1)
+		a.calEntrySel = 0
 		return a, nil
 	}
 	return a, nil
 }
 
-// shiftCalendar moves the cursor by one period of the current scale.
-func (a App) shiftCalendar(n int) time.Time {
-	cur := a.calCursor
-	if cur.IsZero() {
-		cur = a.now()
+// calCursorOrNow is the cursor, defaulting to today.
+func (a App) calCursorOrNow() time.Time {
+	if a.calCursor.IsZero() {
+		return a.now()
 	}
+	return a.calCursor
+}
+
+// shiftCalendarDay moves one column: a day, or a month at year scale where no
+// days are drawn.
+func (a App) shiftCalendarDay(n int) time.Time {
+	cur := a.calCursorOrNow()
+	if a.calScale == calYear {
+		return cur.AddDate(0, n, 0)
+	}
+	return cur.AddDate(0, 0, n)
+}
+
+// shiftCalendarRow moves one row: a week, or a quarter at year scale, which is
+// what a row of the twelve-month grid spans.
+func (a App) shiftCalendarRow(n int) time.Time {
+	cur := a.calCursorOrNow()
+	if a.calScale == calYear {
+		return cur.AddDate(0, 3*n, 0)
+	}
+	return cur.AddDate(0, 0, 7*n)
+}
+
+// shiftCalendar moves by one whole period of the current scale.
+func (a App) shiftCalendar(n int) time.Time {
+	cur := a.calCursorOrNow()
 	switch a.calScale {
 	case calWeek:
 		return cur.AddDate(0, 0, 7*n)
@@ -1816,15 +1885,15 @@ func (a App) helpGroups() []helpGroup {
 			{"", []helpKey{{"p", "track time"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}
 	case viewCalendar:
-		if a.mode == modeAddEvent {
+		if a.mode == modeAddEvent || a.mode == modeEditEvent {
 			return []helpGroup{{"", []helpKey{
-				{"enter", "add"}, {"esc", "cancel"},
+				{"enter", "save"}, {"esc", "cancel"},
 				{"", "title 09:30-10:00 weekdays"},
 			}}}
 		}
 		return []helpGroup{
-			{"Calendar", []helpKey{{"w/m/y", "week/month/year"}, {"←/→", "prev/next"}, {"T", "today"}}},
-			{"", []helpKey{{"a", "add event"}, {"r", "reindex"}, {"C", "export .ics"}}},
+			{"Calendar", []helpKey{{"w/m/y", "week/month/year"}, {"←/→ ↑/↓", "move"}, {"[/]", "prev/next"}, {"T", "today"}}},
+			{"", []helpKey{{"tab", "pick entry"}, {"a", "add"}, {"e", "edit"}, {"d", "delete"}, {"C", "export"}}},
 			{"View", []helpKey{{"1/2/3", "views"}, {",", "settings"}, {"?", "all keys"}, {"q", "quit"}}},
 		}
 	}

@@ -58,7 +58,7 @@ func (e Event) RRule() string {
 	rule := "FREQ=" + freq
 	if len(e.Days) > 0 && e.Repeat == RepeatWeekly {
 		codes := make([]string, 0, len(e.Days))
-		for _, d := range sortWeekdays(e.Days) {
+		for _, d := range SortWeekdays(e.Days) {
 			codes = append(codes, byDayCodes[d])
 		}
 		rule += ";BYDAY=" + strings.Join(codes, ",")
@@ -154,9 +154,9 @@ func (e Event) step(t time.Time, n int) time.Time {
 	}
 }
 
-// sortWeekdays orders a day set Monday first, so a weekly repeat is expanded
+// SortWeekdays orders a day set Monday first, so a weekly repeat is expanded
 // and rendered in the order a working week is read.
-func sortWeekdays(days []time.Weekday) []time.Weekday {
+func SortWeekdays(days []time.Weekday) []time.Weekday {
 	out := make([]time.Weekday, len(days))
 	copy(out, days)
 	sort.Slice(out, func(i, j int) bool {
@@ -221,7 +221,7 @@ func (e Event) weeklyByDay(from, to time.Time, dur time.Duration) []Occurrence {
 	if interval < 1 {
 		interval = 1
 	}
-	days := sortWeekdays(e.Days)
+	days := SortWeekdays(e.Days)
 
 	// Anchor on the Monday of the week the event starts in, so the interval
 	// counts whole weeks rather than sliding with the start's weekday.

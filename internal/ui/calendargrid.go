@@ -37,6 +37,11 @@ type calEntry struct {
 	subs    int // open subtasks, shown in brackets
 	kind    timelineKind
 	overdue bool
+
+	// eventID is set only for calendar events. Tasks and tickets are edited
+	// where they live — the task list and the vault — so only events can be
+	// changed from here.
+	eventID string
 }
 
 // label renders an entry for a day cell.
@@ -66,7 +71,7 @@ func (a App) calendarEntries(from, to time.Time) []calEntry {
 	for _, o := range model.EventsOccurring(a.events, from, to) {
 		out = append(out, calEntry{
 			at: o.Start.In(loc), timed: !o.Event.AllDay,
-			title: o.Event.Title, kind: tlEvent,
+			title: o.Event.Title, kind: tlEvent, eventID: o.Event.ID,
 		})
 	}
 
@@ -170,6 +175,48 @@ func (a App) calRange() (from, to time.Time) {
 		from = time.Date(anchor.Year(), time.January, 1, 0, 0, 0, 0, loc)
 		return from, from.AddDate(1, 0, 0)
 	}
+}
+
+// selectedDay is the day the calendar cursor is on.
+func (a App) selectedDay() time.Time {
+	loc := a.loc
+	if loc == nil {
+		loc = time.Local
+	}
+	cur := a.calCursor
+	if cur.IsZero() {
+		cur = a.now()
+	}
+	return startOfDay(cur.In(loc))
+}
+
+// entriesOnSelectedDay is what the cursor can step through.
+func (a App) entriesOnSelectedDay() []calEntry {
+	day := a.selectedDay()
+	return a.calendarEntries(day, day.AddDate(0, 0, 1))
+}
+
+// selectedEntry is the entry under the cursor, if any.
+func (a App) selectedEntry() (calEntry, bool) {
+	entries := a.entriesOnSelectedDay()
+	if len(entries) == 0 {
+		return calEntry{}, false
+	}
+	return entries[clamp(a.calEntrySel, 0, len(entries)-1)], true
+}
+
+// selectedEvent is the event under the cursor, if the cursor is on one.
+func (a App) selectedEvent() (model.Event, bool) {
+	e, ok := a.selectedEntry()
+	if !ok || e.eventID == "" {
+		return model.Event{}, false
+	}
+	for _, ev := range a.events {
+		if ev.ID == e.eventID {
+			return ev, true
+		}
+	}
+	return model.Event{}, false
 }
 
 // byDay buckets entries into calendar days.

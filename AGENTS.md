@@ -877,3 +877,20 @@ expected order and the one the worklog flush already follows.
 - **A failed push is reported, not retried.** The desktop notification has
   already been shown by then, so it is a degraded delivery rather than a lost
   reminder.
+
+### Editing events
+
+- **Editing reuses the one-line grammar.** What is shown for editing is exactly
+  what would have created the event, so there is one syntax to learn and no
+  second representation to keep in step. `formatEvent` is the inverse of
+  `parseEvent`, and a test round-trips every supported form through both.
+- **The id survives an edit.** Replacing it would make the event arrive as a
+  new entry in a subscriber's calendar and would lose the record of which
+  reminders had already been sent for it.
+- **Only events are editable from the calendar.** Tasks and tickets appear
+  there but are edited where they live, and pressing `e` on one says so rather
+  than doing nothing.
+- **The cursor is a day plus an entry.** A day holds tickets and tasks as well
+  as events, so entry zero is whatever sorts first rather than necessarily an
+  event; `tab` steps through them. A selected entry is kept on screen when a
+  cell overflows, since it is the one about to be edited.

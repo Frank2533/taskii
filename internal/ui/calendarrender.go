@@ -14,7 +14,7 @@ var weekdayNames = []string{"Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"}
 // renderCalendarGrid draws the calendar at the current scale.
 func (a App) renderCalendarGrid() string {
 	height := a.height - a.chromeLines()
-	if a.mode == modeAddEvent {
+	if a.mode == modeAddEvent || a.mode == modeEditEvent {
 		height-- // the input takes a line below the grid
 	}
 	if height < 5 {
@@ -35,7 +35,7 @@ func (a App) renderCalendarGrid() string {
 
 	title := fmt.Sprintf("%s — %s  (%d)", a.calScale, a.calTitle(from), len(entries))
 	pane := renderPane(title, body, true, a.width, height)
-	if a.mode != modeAddEvent {
+	if a.mode != modeAddEvent && a.mode != modeEditEvent {
 		return pane
 	}
 	// The input sits below the grid rather than inside a day cell: an event
@@ -64,6 +64,11 @@ func (a App) calTitle(from time.Time) string {
 // dropped silently: a cell that shows two of five items and says nothing about
 // the rest reads as a complete list.
 func (a App) dayCell(day time.Time, entries []calEntry, width, height int, showTime bool) []string {
+	return a.dayCellSel(day, entries, width, height, showTime, false)
+}
+
+// dayCellSel is dayCell with the cursor drawn on it.
+func (a App) dayCellSel(day time.Time, entries []calEntry, width, height int, showTime, isCursor bool) []string {
 	muted := lipgloss.NewStyle().Foreground(colorMuted).Background(colorPaneBg)
 	text := lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
 	event := lipgloss.NewStyle().Foreground(colorPurple).Background(colorPaneBg)
@@ -75,6 +80,10 @@ func (a App) dayCell(day time.Time, entries []calEntry, width, height int, showT
 	if day.Equal(today) {
 		head += " today"
 		headStyle = lipgloss.NewStyle().Foreground(colorAccent).Background(colorPaneBg).Bold(true)
+	}
+	if isCursor {
+		head = "▌" + head
+		headStyle = headStyle.Background(colorPanel).Bold(true)
 	}
 
 	rows := []string{headStyle.Render(fitToWidth(head, width))}
@@ -91,7 +100,17 @@ func (a App) dayCell(day time.Time, entries []calEntry, width, height int, showT
 			shown = 0
 		}
 	}
-	for i := 0; i < shown; i++ {
+	// Keep the selected entry on screen: it is the one about to be edited, so
+	// scrolling it out from under the cursor would be the worst row to hide.
+	start := 0
+	sel := -1
+	if isCursor && len(entries) > 0 {
+		sel = clamp(a.calEntrySel, 0, len(entries)-1)
+		if sel >= shown {
+			start = sel - shown + 1
+		}
+	}
+	for i := start; i < start+shown && i < len(entries); i++ {
 		e := entries[i]
 		style := text
 		switch {
@@ -100,7 +119,12 @@ func (a App) dayCell(day time.Time, entries []calEntry, width, height int, showT
 		case e.kind == tlEvent:
 			style = event
 		}
-		rows = append(rows, style.Render(fitToWidth(e.label(showTime), width)))
+		prefix := ""
+		if i == sel {
+			style = style.Background(colorPanel).Bold(true)
+			prefix = "›"
+		}
+		rows = append(rows, style.Render(fitToWidth(prefix+e.label(showTime), width)))
 	}
 	if rest := len(entries) - shown; rest > 0 {
 		rows = append(rows, muted.Render(fitToWidth(fmt.Sprintf("+%d more", rest), width)))
@@ -118,9 +142,10 @@ func (a App) renderWeek(from time.Time, days map[string][]calEntry, width, heigh
 	}
 
 	cells := make([][]string, 7)
+	cursor := a.selectedDay()
 	for i := 0; i < 7; i++ {
 		day := from.AddDate(0, 0, i)
-		cells[i] = a.dayCell(day, days[day.Format("2006-01-02")], colWidth-1, height-1, true)
+		cells[i] = a.dayCellSel(day, days[day.Format("2006-01-02")], colWidth-1, height-1, true, day.Equal(cursor))
 	}
 
 	muted := lipgloss.NewStyle().Foreground(colorMuted).Background(colorPaneBg)
@@ -159,6 +184,7 @@ func (a App) renderMonth(from, to time.Time, days map[string][]calEntry, width, 
 	}
 	rows := []string{strings.Join(head, " ")}
 
+	cursor := a.selectedDay()
 	cellHeight := (height - 1) / weeks
 	if cellHeight < 2 {
 		cellHeight = 2
@@ -174,7 +200,7 @@ func (a App) renderMonth(from, to time.Time, days map[string][]calEntry, width, 
 				// aligned all the way down.
 				entries = nil
 			}
-			cells[i] = a.dayCell(day, entries, colWidth-1, cellHeight, false)
+			cells[i] = a.dayCellSel(day, entries, colWidth-1, cellHeight, false, day.Equal(cursor))
 		}
 		rows = append(rows, joinCells(cells, colWidth, cellHeight)...)
 	}

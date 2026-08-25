@@ -66,9 +66,12 @@ func (a App) keyReference() []keySection {
 		return []keySection{
 			{"Calendar", []keyRow{
 				{"w / m / y", "week, month or year"},
-				{"← →  h l", "previous / next period"},
+				{"← →  h l", "move a day (a month at year scale)"},
+				{"↑ ↓  k j", "move a week (a quarter at year scale)"},
+				{"[ ]", "previous / next period"},
 				{"T", "jump to today"},
-				{"a", "add an event"},
+				{"tab", "step through the day's entries"},
+				{"a / e / d", "add, edit or delete an event"},
 				{"r", "reindex the vault"},
 				{"C", "export the calendar now"},
 			}},

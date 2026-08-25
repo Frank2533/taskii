@@ -78,6 +78,9 @@ func (a App) updatePara(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "o":
 		return a.openSelectedInObsidian()
 
+	case "l":
+		return a.openTicketLink()
+
 	case "r":
 		return a, loadIndex(a.vaultPath, a.loc)
 

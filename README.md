@@ -234,6 +234,7 @@ the coming Friday.
 | `a` / `n` | add a task / a dated note to the selected ticket |
 | `u` | file a stranded ticket into the next area |
 | `o` / `r` | open the note in Obsidian / reindex |
+| `l` | open the ticket's link (Jira, then PR) in the browser |
 | `R` `s` `c` `w` | Jira: fetch, status, comment, log tracked time |
 | `p` | track pomodoro time against this ticket |
 
@@ -285,6 +286,19 @@ on every fetch, so anything put there is lost at the next sync.
 
 taskii moves its own notes rather than relying on Obsidian's note-mover plugins,
 whose rules are typically scoped to the tickets folder and would never see them.
+
+### Links
+
+The Jira and PR links on a selected ticket are rendered as clickable
+terminal hyperlinks ([OSC 8](https://gist.github.com/egmontkob/eb114294efbcd5adb1944c9f3cb5feda)):
+Ctrl-click or click, depending on your terminal, opens it directly, no
+keybinding needed. `l` in the PARA view opens it explicitly through the
+system's default browser (`open` / `xdg-open` / `start`) — the Jira link if
+set, else the PR link — which also covers a terminal that does not support
+clickable links at all.
+
+Any `http(s)://` URL pasted into a task or subtask note is made clickable the
+same way, wherever it is shown.
 
 ### Notes on tasks
 

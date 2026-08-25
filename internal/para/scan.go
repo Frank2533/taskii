@@ -427,6 +427,7 @@ func readTicket(path string, loc *time.Location, archived bool) (Ticket, bool) {
 		Assignee:   field(n.Front, "assignee"),
 		Sprint:     field(n.Front, "sprint"),
 		Link:       field(n.Front, "link"),
+		PRLink:     field(n.Front, "pr_link"),
 		Path:       path,
 		Archived:   archived,
 		Checkboxes: checkboxes(n, loc),

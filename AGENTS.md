@@ -972,3 +972,23 @@ Tests that exercise persistence cannot use mock mode, which is what normally
 suppresses desktop notifications, so `desktopSend` is indirected and silenced in
 `TestMain`. `runCmd`'s wait is bounded because a tick's batch carries the next
 tick, which sleeps for its whole interval.
+
+### Clickable links
+
+- **OSC 8, applied last.** `x/ansi`'s width, wrap and truncate functions treat
+  the hyperlink escape as zero-width (confirmed against the vendored version's
+  own hyperlink test fixtures), so wrapping happens as the final step on an
+  already-fitted, already-styled string — the same rule this codebase already
+  follows for every ANSI-styled span. It degrades safely: a terminal that does
+  not understand OSC 8 simply ignores the bytes.
+- **`linkifyURLs` operates on rendered text, not plain text**, which only
+  works because every call site here renders a whole line with one
+  `style.Render(...)` call — the content bytes are untouched by that, so a URL
+  substring found in the plain source text is still present verbatim in the
+  styled output and can be matched and wrapped directly. A call site that
+  composed a line from several separately-rendered spans would break this
+  assumption.
+- **`l` opens the Jira link, falling back to the PR link**, through the
+  platform's own opener (`open` / `xdg-open` / `start`) — a fallback for a
+  terminal, multiplexer, or SSH session that does not pass OSC 8 through to the
+  point of click, not a replacement for it.

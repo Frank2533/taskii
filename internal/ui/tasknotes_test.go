@@ -8,6 +8,7 @@ import (
 	"time"
 
 	tea "github.com/charmbracelet/bubbletea"
+	"github.com/charmbracelet/x/ansi"
 
 	"taskii/internal/para"
 )
@@ -195,5 +196,26 @@ func TestTaskNoteCanBeCancelled(t *testing.T) {
 	}
 	if strings.Contains(a.View(), "never mind") {
 		t.Error("the cancelled text is still shown")
+	}
+}
+
+// A URL pasted into a task note must render clickable, in the pane where it
+// actually appears — not just be provable at the helper-function level.
+func TestURLInATaskNoteIsClickableInTheNotesPane(t *testing.T) {
+	a, root := syncedApp(t)
+	a = press(t, a, "a")
+	a = typeInto(a, "buy oat milk")
+	a = press(t, a, "enter")
+
+	a.todaySelected = 0
+	a = press(t, a, "N")
+	a = typeInto(a, "see https://example.com/receipt for the order")
+	a = press(t, a, "enter")
+	a = reindex(t, a, root)
+
+	a.focus = focusToday
+	out := a.View()
+	if !strings.Contains(out, ansi.SetHyperlink("https://example.com/receipt")) {
+		t.Errorf("the pasted URL is not clickable:\n%s", out)
 	}
 }

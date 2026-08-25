@@ -233,7 +233,11 @@ func (a App) renderTaskNotes(target noteTarget, width, height int) string {
 			if i == 0 {
 				marker = "• "
 			}
-			rows = append(rows, text.Render(fitToWidth(marker+chunk, width)))
+			rendered := text.Render(fitToWidth(marker+chunk, width))
+			// Any URL pasted into a note becomes clickable in place, since
+			// this is exactly the kind of freeform text people paste links
+			// into.
+			rows = append(rows, linkifyURLs(rendered))
 		}
 		shown++
 	}

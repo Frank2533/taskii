@@ -437,6 +437,25 @@ func (a App) renderDetail(width, height int) string {
 	field("Priority", t.Priority)
 	field("Epic", t.EpicLink)
 	field("Sprint", t.Sprint)
+
+	// Rendered in accent colour with an OSC 8 wrapper, so a terminal that
+	// understands hyperlinks makes the whole field clickable — and l opens it
+	// directly for one that does not.
+	linkField := func(label, url string) {
+		if strings.TrimSpace(url) == "" {
+			return
+		}
+		lbl := fmt.Sprintf("%-*s", labelCol, label+":")
+		room := width - labelCol
+		if room < 1 {
+			return
+		}
+		value := lipgloss.NewStyle().Foreground(colorAccent).Background(colorPaneBg).
+			Underline(true).Render(fitToWidth(url, room))
+		add(muted.Render(lbl) + hyperlinkField(value, url))
+	}
+	linkField("Link", t.Link)
+	linkField("PR", t.PRLink)
 	if t.HasDue {
 		field("Due", t.Due.Format("Mon 02 Jan 2006"))
 	}

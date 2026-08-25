@@ -58,6 +58,7 @@ type Ticket struct {
 	Assignee  string
 	Sprint    string
 	Link      string
+	PRLink    string
 
 	Due    time.Time
 	HasDue bool

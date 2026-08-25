@@ -43,6 +43,7 @@ func (a App) keyReference() []keySection {
 				{"n", "add a dated note to the ticket"},
 				{"u", "file the ticket under the next area"},
 				{"o", "open the note in Obsidian"},
+				{"l", "open the ticket's link (Jira, then PR) in the browser"},
 				{"r", "reindex the vault"},
 				{"C", "export the calendar now"},
 			}},

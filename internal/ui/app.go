@@ -400,6 +400,14 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		subtaskCmd := a.fireSubtaskReminders()
 		return a, tea.Batch(taskCmd, eventCmd, subtaskCmd, reminderTick())
 
+	case openURLMsg:
+		if msg.err != nil {
+			a.err = "could not open browser: " + msg.err.Error()
+		} else {
+			a.status = "opened " + msg.url
+		}
+		return a, nil
+
 	case pushFailedMsg:
 		// The desktop notification was already shown, so this reports a
 		// degraded delivery rather than a lost reminder.
@@ -1952,7 +1960,7 @@ func (a App) helpGroups() []helpGroup {
 		return []helpGroup{
 			{"View", []helpKey{{"1/2/3", "views"}, {",", "settings"}, {"?", "all keys"}}},
 			{"Move", []helpKey{{"tab", "pane"}, {"↑/↓ j/k", "select"}, {"enter", "toggle"}}},
-			{"Vault", []helpKey{{"a", "add task"}, {"n", "add note"}, {"u", "set area"}, {"o", "open"}, {"r", "reindex"}}},
+			{"Vault", []helpKey{{"a", "add task"}, {"n", "add note"}, {"u", "set area"}, {"o", "open"}, {"l", "link"}, {"r", "reindex"}}},
 			jiraHelpGroup(a.jiraEnabled),
 			{"", []helpKey{{"p", "track time"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}

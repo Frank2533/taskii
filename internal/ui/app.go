@@ -389,7 +389,15 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, pomodoroTick()
 
 	case reminderTickMsg:
-		return a, tea.Batch(a.fireReminders(), a.fireEventReminders(), reminderTick())
+		// Both calls mutate the model — marking reminders as fired — and Go
+		// does not specify whether a plain operand in a return statement is
+		// evaluated before or after the calls beside it. Sequencing them into
+		// variables first makes the returned model definitely the one the
+		// tick produced; leaving it to chance risks re-firing every reminder
+		// on the next sweep.
+		taskCmd := a.fireReminders()
+		eventCmd := a.fireEventReminders()
+		return a, tea.Batch(taskCmd, eventCmd, reminderTick())
 
 	case pushFailedMsg:
 		// The desktop notification was already shown, so this reports a

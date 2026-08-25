@@ -198,3 +198,82 @@ func TestParaViewExplainsMissingVault(t *testing.T) {
 		t.Errorf("expected an explanation, got:\n%s", got.View())
 	}
 }
+
+// The detail pane pads each label to the full pane width, which pushes the
+// value off the right edge — every field renders as an empty label.
+func TestDetailPaneShowsFieldValues(t *testing.T) {
+	a := press(t, newTestApp(t, 150, 40), "2")
+	out := a.View()
+	for _, want := range []string{"In Progress", "QCOM"} {
+		if !strings.Contains(out, want) {
+			t.Errorf("detail pane does not show field value %q", want)
+		}
+	}
+}
+
+// Quick-add captures keys but nothing renders the input, so typing looks like
+// it does nothing at all.
+func TestQuickAddShowsWhatIsTyped(t *testing.T) {
+	a := press(t, newTestApp(t, 150, 40), "2", "a")
+	if a.mode != modeVaultAdding {
+		t.Fatalf("mode = %v, want modeVaultAdding", a.mode)
+	}
+	a = press(t, a, "h", "e", "l", "l", "o")
+	if got := a.input.Value(); got != "hello" {
+		t.Fatalf("input value = %q, want \"hello\"", got)
+	}
+	if !strings.Contains(a.View(), "hello") {
+		t.Errorf("typed text is not rendered anywhere:\n%s", a.View())
+	}
+}
+
+// Reindex must pick up changes made on disk while the app is open — Obsidian,
+// its plugins and a Jira fetch all rewrite these notes behind our back.
+func TestReindexPicksUpDiskChanges(t *testing.T) {
+	root := fixtureVault(t)
+	a := NewApp(Options{Mock: true, Vault: root, Location: time.UTC})
+	a.loc = time.UTC
+	m, _ := a.Update(tea.WindowSizeMsg{Width: 150, Height: 40})
+
+	// Deliver the initial index the way Init's command would.
+	idx, err := para.Scan(root, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ = m.(App).Update(indexMsg{idx: idx})
+	app := press(t, m.(App), "2")
+	if strings.Contains(app.View(), "brand new task") {
+		t.Fatal("fixture already contains the new task")
+	}
+
+	// Change the note on disk, then reindex.
+	path := filepath.Join(root, "Tickets", "AAA-1 In Progress live.md")
+	body, err := os.ReadFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(path, append(body, []byte("- [ ] brand new task\n")...), 0o644); err != nil {
+		t.Fatal(err)
+	}
+
+	next, cmd := app.Update(tea.KeyMsg{Type: tea.KeyRunes, Runes: []rune("r")})
+	if cmd == nil {
+		t.Fatal("r produced no reindex command")
+	}
+	msg := cmd()
+	got, ok := msg.(indexMsg)
+	if !ok {
+		t.Fatalf("reindex returned %T, want indexMsg", msg)
+	}
+	if got.err != nil {
+		t.Fatal(got.err)
+	}
+	final, _ := next.(App).Update(got)
+	app = final.(App)
+
+	// Move focus to the detail pane so the task list is on screen.
+	app = press(t, app, "tab", "tab")
+	if !strings.Contains(app.View(), "brand new task") {
+		t.Errorf("reindex did not surface the new task:\n%s", app.View())
+	}
+}

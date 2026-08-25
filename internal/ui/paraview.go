@@ -173,6 +173,10 @@ type paraGeometry struct {
 
 func (a App) paraGeometry() paraGeometry {
 	height := a.height - a.chromeLines()
+	if a.mode == modeVaultAdding {
+		// The input occupies a line below the panes.
+		height--
+	}
 	if height < 3 {
 		height = 3
 	}
@@ -209,11 +213,11 @@ func (a App) renderPara() string {
 	if g.treeWidth == 0 {
 		switch a.vault.pane {
 		case paraTree:
-			return renderPane("Navigator", a.renderTree(rows, g.listWidth-4, g.height-2), true, g.listWidth, g.height)
+			return a.withQuickAdd(renderPane("Navigator", a.renderTree(rows, g.listWidth-4, g.height-2), true, g.listWidth, g.height), g)
 		case paraDetail:
-			return renderPane(a.detailTitle(), a.renderDetail(g.listWidth-4, g.height-2), true, g.listWidth, g.height)
+			return a.withQuickAdd(renderPane(a.detailTitle(), a.renderDetail(g.listWidth-4, g.height-2), true, g.listWidth, g.height), g)
 		default:
-			return renderPane(a.listTitle(rows), a.renderTicketList(tickets, g.listWidth-4, g.height-2), true, g.listWidth, g.height)
+			return a.withQuickAdd(renderPane(a.listTitle(rows), a.renderTicketList(tickets, g.listWidth-4, g.height-2), true, g.listWidth, g.height), g)
 		}
 	}
 
@@ -224,7 +228,32 @@ func (a App) renderPara() string {
 	if g.detailWidth > 0 {
 		panes = append(panes, renderPane(a.detailTitle(), a.renderDetail(g.detailWidth-4, g.height-2), a.vault.pane == paraDetail, g.detailWidth, g.height))
 	}
-	return lipgloss.JoinHorizontal(lipgloss.Top, panes...)
+	return a.withQuickAdd(lipgloss.JoinHorizontal(lipgloss.Top, panes...), g)
+}
+
+// withQuickAdd appends the task input beneath the panes.
+//
+// It is rendered as a full-width line rather than inside a pane because the
+// panes are fixed-size blocks and which of them is on screen depends on the
+// terminal width — a prompt tucked into the detail pane would simply vanish on
+// a narrow terminal, which is what made typing look like it did nothing.
+func (a App) withQuickAdd(body string, g paraGeometry) string {
+	if a.mode != modeVaultAdding {
+		return body
+	}
+	target := ""
+	if t, ok := a.selectedTicket(); ok {
+		target = t.Key
+	}
+	prompt := inputPromptStyle.Render("+ ")
+	label := lipgloss.NewStyle().Foreground(colorMuted).Render(target + " " + quickAddHeading + "  ")
+
+	a.input.TextStyle = lipgloss.NewStyle().Foreground(colorText)
+	a.input.PromptStyle = lipgloss.NewStyle().Foreground(colorAccent)
+	a.input.Cursor.Style = lipgloss.NewStyle().Foreground(colorText)
+	a.input.Width = 0
+
+	return lipgloss.JoinVertical(lipgloss.Left, body, prompt+label+a.input.View())
 }
 
 // vaultStatusLine explains why the vault views are empty, if they are.
@@ -350,11 +379,20 @@ func (a App) renderDetail(width, height int) string {
 	}
 
 	add(text.Bold(true).Render(fitToWidth(t.Summary, width)))
+	// Labels are padded to a fixed column, NOT to the pane width: fitting the
+	// label to the full width pushed every value off the right edge, so each
+	// field rendered as a label with nothing after it.
+	const labelCol = 10
 	field := func(label, value string) {
 		if strings.TrimSpace(value) == "" {
 			return
 		}
-		add(muted.Render(fitToWidth(label+": ", width)) + text.Render(fitToWidth(value, width-len(label)-2)))
+		label = fmt.Sprintf("%-*s", labelCol, label+":")
+		room := width - labelCol
+		if room < 1 {
+			return
+		}
+		add(muted.Render(label) + text.Render(fitToWidth(value, room)))
 	}
 	field("Status", t.Status)
 	field("Area", t.Area)

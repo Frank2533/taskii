@@ -3,6 +3,8 @@ package model
 import (
 	"encoding/json"
 	"os"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -21,6 +23,15 @@ const (
 
 // Repeats lists the cycle order used by the UI.
 var Repeats = []Repeat{RepeatNone, RepeatDaily, RepeatWeekly, RepeatMonthly, RepeatYearly}
+
+// Weekdays is Monday to Friday, the working week.
+var Weekdays = []time.Weekday{time.Monday, time.Tuesday, time.Wednesday, time.Thursday, time.Friday}
+
+// byDayCodes are the RFC 5545 two-letter weekday names.
+var byDayCodes = map[time.Weekday]string{
+	time.Sunday: "SU", time.Monday: "MO", time.Tuesday: "TU", time.Wednesday: "WE",
+	time.Thursday: "TH", time.Friday: "FR", time.Saturday: "SA",
+}
 
 func (r Repeat) String() string {
 	if r == RepeatNone {
@@ -45,6 +56,13 @@ func (e Event) RRule() string {
 		return ""
 	}
 	rule := "FREQ=" + freq
+	if len(e.Days) > 0 && e.Repeat == RepeatWeekly {
+		codes := make([]string, 0, len(e.Days))
+		for _, d := range sortWeekdays(e.Days) {
+			codes = append(codes, byDayCodes[d])
+		}
+		rule += ";BYDAY=" + strings.Join(codes, ",")
+	}
 	if e.Interval > 1 {
 		rule += ";INTERVAL=" + itoa(e.Interval)
 	}
@@ -85,6 +103,11 @@ type Event struct {
 	Interval int `json:"interval,omitempty"`
 	// Until bounds a repeat. Nil repeats indefinitely.
 	Until *time.Time `json:"until,omitempty"`
+
+	// Days restricts a weekly repeat to particular weekdays, which is how a
+	// standup that runs Monday to Friday is expressed. Empty means the repeat
+	// falls on whatever weekday Start does.
+	Days []time.Weekday `json:"days,omitempty"`
 
 	Location string `json:"location,omitempty"`
 	Notes    string `json:"notes,omitempty"`
@@ -131,6 +154,20 @@ func (e Event) step(t time.Time, n int) time.Time {
 	}
 }
 
+// sortWeekdays orders a day set Monday first, so a weekly repeat is expanded
+// and rendered in the order a working week is read.
+func sortWeekdays(days []time.Weekday) []time.Weekday {
+	out := make([]time.Weekday, len(days))
+	copy(out, days)
+	sort.Slice(out, func(i, j int) bool {
+		return mondayIndex(out[i]) < mondayIndex(out[j])
+	})
+	return out
+}
+
+// mondayIndex numbers weekdays from Monday, since Go numbers them from Sunday.
+func mondayIndex(d time.Weekday) int { return (int(d) + 6) % 7 }
+
 // maxOccurrences bounds expansion so a daily event with no end date cannot
 // spin forever when asked for an implausible range.
 const maxOccurrences = 2000
@@ -153,6 +190,10 @@ func (e Event) Occurrences(from, to time.Time) []Occurrence {
 		return nil
 	}
 
+	if e.Repeat == RepeatWeekly && len(e.Days) > 0 {
+		return e.weeklyByDay(from, to, dur)
+	}
+
 	var out []Occurrence
 	for n := 0; n < maxOccurrences; n++ {
 		start := e.step(e.Start, n)
@@ -165,6 +206,54 @@ func (e Event) Occurrences(from, to time.Time) []Occurrence {
 		end := start.Add(dur)
 		if end.After(from) {
 			out = append(out, Occurrence{Event: e, Start: start, End: end})
+		}
+	}
+	return out
+}
+
+// weeklyByDay expands a weekly repeat that names its own weekdays.
+//
+// The event's own weekday is ignored: what matters is the time of day and the
+// set of days chosen, so a standup created on a Wednesday and set to weekdays
+// still runs on the Monday.
+func (e Event) weeklyByDay(from, to time.Time, dur time.Duration) []Occurrence {
+	interval := e.Interval
+	if interval < 1 {
+		interval = 1
+	}
+	days := sortWeekdays(e.Days)
+
+	// Anchor on the Monday of the week the event starts in, so the interval
+	// counts whole weeks rather than sliding with the start's weekday.
+	loc := e.Start.Location()
+	anchor := time.Date(e.Start.Year(), e.Start.Month(), e.Start.Day(), 0, 0, 0, 0, loc).
+		AddDate(0, 0, -mondayIndex(e.Start.Weekday()))
+
+	var out []Occurrence
+	for w := 0; w < maxOccurrences; w++ {
+		weekStart := anchor.AddDate(0, 0, 7*interval*w)
+		if !weekStart.Before(to) {
+			break
+		}
+		for _, d := range days {
+			day := weekStart.AddDate(0, 0, mondayIndex(d))
+			start := time.Date(day.Year(), day.Month(), day.Day(),
+				e.Start.Hour(), e.Start.Minute(), 0, 0, loc)
+			if start.Before(e.Start) {
+				continue
+			}
+			if e.Until != nil && start.After(*e.Until) {
+				return out
+			}
+			if !start.Before(to) {
+				continue
+			}
+			if end := start.Add(dur); end.After(from) {
+				out = append(out, Occurrence{Event: e, Start: start, End: end})
+			}
+		}
+		if len(out) >= maxOccurrences {
+			break
 		}
 	}
 	return out

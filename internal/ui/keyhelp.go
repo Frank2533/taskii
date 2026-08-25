@@ -76,6 +76,8 @@ func (a App) keyReference() []keySection {
 				{"09:30-10:00", "start and end (required)"},
 				{"!tmr !2d !fri", "which day (today if omitted)"},
 				{"daily weekly", "monthly, yearly"},
+				{"weekdays", "Mon-Fri (implies weekly)"},
+				{"mon,wed,fri", "specific days (implies weekly)"},
 				{"x2", "every other period"},
 			}},
 			common,

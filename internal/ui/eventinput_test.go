@@ -100,3 +100,56 @@ func TestRepeatingEventExportsAsOneEntryWithARule(t *testing.T) {
 		t.Errorf("rule = %q", a.events[0].RRule())
 	}
 }
+
+func TestParseEventWeekdays(t *testing.T) {
+	now := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC) // Wednesday
+	ev, ok := parseEvent("standup 09:30-09:45 weekdays", now)
+	if !ok {
+		t.Fatal("not parsed")
+	}
+	if ev.Title != "standup" {
+		t.Errorf("title = %q", ev.Title)
+	}
+	// Naming days implies weekly; the word "weekly" should not be required.
+	if ev.Repeat != model.RepeatWeekly {
+		t.Errorf("repeat = %q, want weekly", ev.Repeat)
+	}
+	if len(ev.Days) != 5 {
+		t.Errorf("days = %v, want Mon-Fri", ev.Days)
+	}
+	if ev.RRule() != "FREQ=WEEKLY;BYDAY=MO,TU,WE,TH,FR" {
+		t.Errorf("rule = %q", ev.RRule())
+	}
+}
+
+func TestParseEventExplicitDayList(t *testing.T) {
+	now := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC)
+	ev, ok := parseEvent("gym 07:00-08:00 mon,wed,fri", now)
+	if !ok {
+		t.Fatal("not parsed")
+	}
+	if ev.Title != "gym" {
+		t.Errorf("title = %q, want the day list stripped", ev.Title)
+	}
+	if len(ev.Days) != 3 {
+		t.Errorf("days = %v", ev.Days)
+	}
+}
+
+// A bare weekday names a recurrence day; "!fri" still means the coming Friday.
+func TestDayNamesAndDeadlineTokensDoNotCollide(t *testing.T) {
+	now := time.Date(2026, 8, 26, 15, 0, 0, 0, time.UTC) // Wednesday
+	ev, ok := parseEvent("review 14:00-15:00 !fri", now)
+	if !ok {
+		t.Fatal("not parsed")
+	}
+	if len(ev.Days) != 0 {
+		t.Errorf("days = %v, want none — !fri picks a date, not a day set", ev.Days)
+	}
+	if ev.Start.Weekday() != time.Friday || ev.Start.Day() != 28 {
+		t.Errorf("start = %v, want the coming Friday", ev.Start)
+	}
+	if ev.Repeat != model.RepeatNone {
+		t.Errorf("repeat = %q, want none", ev.Repeat)
+	}
+}

@@ -1798,7 +1798,7 @@ func (a App) helpGroups() []helpGroup {
 		if a.mode == modeAddEvent {
 			return []helpGroup{{"", []helpKey{
 				{"enter", "add"}, {"esc", "cancel"},
-				{"", "title 09:30-10:00 !tmr weekly"},
+				{"", "title 09:30-10:00 weekdays"},
 			}}}
 		}
 		return []helpGroup{

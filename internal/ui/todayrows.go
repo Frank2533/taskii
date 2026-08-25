@@ -171,7 +171,7 @@ func (a App) toggleTodayRow() (App, bool) {
 		return a, false
 	}
 	if err := vault.SetCheckbox(r.ticketPath, r.sub.Line, r.sub.Text, !r.sub.Done); err != nil {
-		a.err = err.Error()
+		a.setErr(err.Error())
 	}
 	// Reindex either way: a refusal means our picture of the note is stale.
 	return a, true

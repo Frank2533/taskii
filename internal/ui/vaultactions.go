@@ -109,7 +109,7 @@ func (a App) updatePara(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			a.pomoCounted = 0
 		}
 		a.pomo.toggle()
-		a.status = "Pomodoro tracking " + a.pomoKey
+		a.setStatus("Pomodoro tracking " + a.pomoKey)
 		return a, nil
 	}
 	return a, nil
@@ -158,18 +158,18 @@ func (a App) toggleSelectedCheckbox() (tea.Model, tea.Cmd) {
 	// The text is passed so the write refuses if the file moved on since the
 	// index was built.
 	if err := vault.SetCheckbox(t.Path, c.Line, c.Text, !c.Done); err != nil {
-		a.err = err.Error()
+		a.setErr(err.Error())
 		// A stale write means our picture of the note is wrong, so reindex.
 		return a, loadIndex(a.vaultPath, a.loc)
 	}
-	a.status = "toggled: " + c.Text
+	a.setStatus("toggled: " + c.Text)
 	return a, loadIndex(a.vaultPath, a.loc)
 }
 
 // beginQuickAdd opens the input for a new task line.
 func (a App) beginQuickAdd() (tea.Model, tea.Cmd) {
 	if _, ok := a.selectedTicket(); !ok {
-		a.err = "select a ticket first"
+		a.setErr("select a ticket first")
 		return a, nil
 	}
 	a.mode = modeVaultAdding
@@ -192,17 +192,17 @@ func (a App) commitQuickAdd(text string) (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	if err := vault.AppendCheckbox(t.Path, quickAddHeading, text); err != nil {
-		a.err = err.Error()
+		a.setErr(err.Error())
 		return a, nil
 	}
-	a.status = "added to " + t.Key
+	a.setStatus("added to " + t.Key)
 	return a, loadIndex(a.vaultPath, a.loc)
 }
 
 // beginTicketNote opens the input for a note against the selected ticket.
 func (a App) beginTicketNote() (tea.Model, tea.Cmd) {
 	if _, ok := a.selectedTicket(); !ok {
-		a.err = "select a ticket first"
+		a.setErr("select a ticket first")
 		return a, nil
 	}
 	a.mode = modeTicketNote
@@ -247,10 +247,10 @@ func (a App) commitTicketNote(text string) (tea.Model, tea.Cmd) {
 	}
 	line := fmt.Sprintf("- %s — %s", time.Now().In(a.loc).Format("2006-01-02 15:04"), text)
 	if err := vault.AppendUnderHeading(t.Path, worklogHeading, line); err != nil {
-		a.err = err.Error()
+		a.setErr(err.Error())
 		return a, nil
 	}
-	a.status = "note added to " + t.Key
+	a.setStatus("note added to " + t.Key)
 	return a, loadIndex(a.vaultPath, a.loc)
 }
 
@@ -266,7 +266,7 @@ func (a App) cycleAreaOnSelected() (tea.Model, tea.Cmd) {
 	}
 	areas := a.idx.AreaNames()
 	if len(areas) == 0 {
-		a.err = "no areas defined in this vault"
+		a.setErr("no areas defined in this vault")
 		return a, nil
 	}
 	next := areas[0]
@@ -277,10 +277,10 @@ func (a App) cycleAreaOnSelected() (tea.Model, tea.Cmd) {
 		}
 	}
 	if err := vault.SetProperty(t.Path, "area", next); err != nil {
-		a.err = err.Error()
+		a.setErr(err.Error())
 		return a, nil
 	}
-	a.status = fmt.Sprintf("%s filed under %s", t.Key, next)
+	a.setStatus(fmt.Sprintf("%s filed under %s", t.Key, next))
 	return a, loadIndex(a.vaultPath, a.loc)
 }
 
@@ -291,7 +291,7 @@ func (a App) openSelectedInObsidian() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	if !a.obs.Available() {
-		a.err = a.obs.Unavailable()
+		a.setErr(a.obs.Unavailable())
 		return a, nil
 	}
 	path := t.Path
@@ -304,11 +304,11 @@ func (a App) openSelectedInObsidian() (tea.Model, tea.Cmd) {
 // jiraAction dispatches a plugin command against the selected ticket.
 func (a App) jiraAction(label string, fn func(*obsidian.Client, context.Context, string) (string, error)) (tea.Model, tea.Cmd) {
 	if !a.jiraEnabled {
-		a.err = "Jira is disabled — enable it in settings (,)"
+		a.setErr("Jira is disabled — enable it in settings (,)")
 		return a, nil
 	}
 	if !a.obs.Available() {
-		a.err = a.obs.Unavailable()
+		a.setErr(a.obs.Unavailable())
 		return a, nil
 	}
 	path := ""
@@ -317,7 +317,7 @@ func (a App) jiraAction(label string, fn func(*obsidian.Client, context.Context,
 	}
 	client := a.obs
 	a.busy = label
-	a.status = label + "..."
+	a.setStatus(label + "...")
 	return a, runAction(label, func(ctx context.Context) (string, error) {
 		return fn(client, ctx, path)
 	})
@@ -337,30 +337,30 @@ func (a App) flushWorklog() (tea.Model, tea.Cmd) {
 	entry := a.wl.Get(t.Key)
 	pending := entry.Pending()
 	if pending <= 0 {
-		a.status = "no tracked time for " + t.Key
+		a.setStatus("no tracked time for " + t.Key)
 		return a, nil
 	}
 	amount := worklog.Format(pending)
 	line := fmt.Sprintf("- %s — %s tracked", time.Now().In(a.loc).Format("2006-01-02 15:04"), amount)
 	if err := vault.AppendUnderHeading(t.Path, worklogHeading, line); err != nil {
-		a.err = err.Error()
+		a.setErr(err.Error())
 		return a, nil
 	}
 	a.wl.MarkFlushed(t.Key, pending)
 	_ = a.wl.Save()
-	a.status = fmt.Sprintf("logged %s to %s", amount, t.Key)
+	a.setStatus(fmt.Sprintf("logged %s to %s", amount, t.Key))
 
 	if !a.worklogPush || !a.jiraEnabled {
 		return a, loadIndex(a.vaultPath, a.loc)
 	}
 	if !a.obs.Available() {
-		a.err = a.obs.Unavailable()
+		a.setErr(a.obs.Unavailable())
 		return a, loadIndex(a.vaultPath, a.loc)
 	}
 	// The batch command reads its input from a frontmatter property instead
 	// of prompting, which is what lets this run without a modal.
 	if err := vault.SetProperty(t.Path, "jira_worklog_batch", amount); err != nil {
-		a.err = err.Error()
+		a.setErr(err.Error())
 		return a, loadIndex(a.vaultPath, a.loc)
 	}
 	client := a.obs

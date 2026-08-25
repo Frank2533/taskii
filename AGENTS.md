@@ -992,3 +992,24 @@ tick, which sleeps for its whole interval.
   platform's own opener (`open` / `xdg-open` / `start`) — a fallback for a
   terminal, multiplexer, or SSH session that does not pass OSC 8 through to the
   point of click, not a replacement for it.
+
+### The status/error line is one line, not two independent ones
+
+`assemblePage` shows `err` in preference to `status` on the same line — by
+design, an error should never be silently outranked by an older success. But
+until now nothing cleared either one when the other was set, so a failure from
+any earlier, wholly unrelated action stuck on screen and masked every later
+success indefinitely, including ones that had nothing to do with it and worked
+perfectly. Reindexing was reported as "not working" for exactly this reason: it
+was reindexing correctly, but a stale error from something else entirely — a
+missing link, an unselected ticket, anything — was still showing and looked
+like reindex's own failure.
+
+`setStatus`/`setErr` on `*App` are the only way either field should be set now:
+each clears the other, so the status line always reflects whichever happened
+most recently. All 82 call sites across `internal/ui` were converted
+mechanically (`a.err = X` → `a.setErr(X)`, `a.status = X` → `a.setStatus(X)`) —
+sprinkling `a.err = ""` next to every existing `a.status = ...` by hand is
+exactly the kind of thing that is easy to miss once and have the bug come back.
+`settingsUI.err` and `form.err` are separate, screen-local error fields for
+their own overlays and are untouched by this.

@@ -135,7 +135,7 @@ func (a App) applyScope(choice scopeChoice) (tea.Model, tea.Cmd) {
 		}
 	}
 	if idx < 0 {
-		a.err = "that event no longer exists"
+		a.setErr("that event no longer exists")
 		return a, nil
 	}
 	original := a.events[idx]
@@ -144,7 +144,7 @@ func (a App) applyScope(choice scopeChoice) (tea.Model, tea.Cmd) {
 	case scopeAll:
 		if pending.action == scopeDelete {
 			a.events = append(a.events[:idx:idx], a.events[idx+1:]...)
-			a.status = "deleted " + original.Title
+			a.setStatus("deleted " + original.Title)
 		} else {
 			edited := pending.edited
 			// The id is kept so the series stays the same entry for anyone
@@ -152,7 +152,7 @@ func (a App) applyScope(choice scopeChoice) (tea.Model, tea.Cmd) {
 			edited.ID = original.ID
 			edited.Except = original.Except
 			a.events[idx] = edited
-			a.status = "updated the whole series"
+			a.setStatus("updated the whole series")
 		}
 
 	case scopeThis:
@@ -161,7 +161,7 @@ func (a App) applyScope(choice scopeChoice) (tea.Model, tea.Cmd) {
 		original.Except = append(original.Except, pending.occurrence)
 		a.events[idx] = original
 		if pending.action == scopeDelete {
-			a.status = "removed " + pending.occurrence.Format("Mon 02 Jan")
+			a.setStatus("removed " + pending.occurrence.Format("Mon 02 Jan"))
 		} else {
 			one := pending.edited
 			if !pending.dateExplicit {
@@ -173,7 +173,7 @@ func (a App) applyScope(choice scopeChoice) (tea.Model, tea.Cmd) {
 			one.Interval = 0
 			one.Except = nil
 			a.events = append(a.events, one)
-			a.status = "updated just " + pending.occurrence.Format("Mon 02 Jan")
+			a.setStatus("updated just " + pending.occurrence.Format("Mon 02 Jan"))
 		}
 
 	case scopeFuture:
@@ -185,19 +185,19 @@ func (a App) applyScope(choice scopeChoice) (tea.Model, tea.Cmd) {
 			// Nothing precedes this occurrence, so there is no split to make.
 			if pending.action == scopeDelete {
 				a.events = append(a.events[:idx:idx], a.events[idx+1:]...)
-				a.status = "deleted " + original.Title
+				a.setStatus("deleted " + original.Title)
 				break
 			}
 			edited := pending.edited
 			edited.ID = original.ID
 			a.events[idx] = edited
-			a.status = "updated the whole series"
+			a.setStatus("updated the whole series")
 			break
 		}
 		original.Until = &until
 		a.events[idx] = original
 		if pending.action == scopeDelete {
-			a.status = "ended the series before " + pending.occurrence.Format("Mon 02 Jan")
+			a.setStatus("ended the series before " + pending.occurrence.Format("Mon 02 Jan"))
 		} else {
 			rest := pending.edited
 			if !pending.dateExplicit {
@@ -206,7 +206,7 @@ func (a App) applyScope(choice scopeChoice) (tea.Model, tea.Cmd) {
 			rest.ID = newEventID(a.now(), 1)
 			rest.Except = nil
 			a.events = append(a.events, rest)
-			a.status = "updated this and future occurrences"
+			a.setStatus("updated this and future occurrences")
 		}
 	}
 

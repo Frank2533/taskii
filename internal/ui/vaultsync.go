@@ -66,7 +66,7 @@ func (a *App) syncLocalTask(id string) {
 		}
 		path, err := vault.WriteTaskNote(a.projectDir(), n)
 		if err != nil {
-			a.err = "vault sync: " + err.Error()
+			a.setErr("vault sync: " + err.Error())
 			return
 		}
 		t.NotePath = path
@@ -85,7 +85,7 @@ func (a *App) archiveLocalTask(t *model.Task) {
 		// The cached path can be stale or absent; taskii_id is the identity.
 		found, err := vault.FindNoteByID(a.projectDir(), t.ID)
 		if err != nil {
-			a.err = "vault sync: " + err.Error()
+			a.setErr("vault sync: " + err.Error())
 			return
 		}
 		path = found
@@ -95,7 +95,7 @@ func (a *App) archiveLocalTask(t *model.Task) {
 	}
 	moved, err := vault.ArchiveTaskNote(path, a.archiveDir())
 	if err != nil {
-		a.err = "vault archive: " + err.Error()
+		a.setErr("vault archive: " + err.Error())
 		return
 	}
 	t.NotePath = moved
@@ -117,7 +117,7 @@ func (a *App) retireDeletedTask(t model.Task) {
 	if path == "" {
 		found, err := vault.FindNoteByID(a.projectDir(), t.ID)
 		if err != nil {
-			a.err = "vault sync: " + err.Error()
+			a.setErr("vault sync: " + err.Error())
 			return
 		}
 		path = found
@@ -128,10 +128,10 @@ func (a *App) retireDeletedTask(t model.Task) {
 	// Marked before the move so the status is right wherever it ends up, and
 	// so a note that fails to move still reads as deleted.
 	if err := vault.SetProperty(path, "status", "deleted"); err != nil {
-		a.err = "vault sync: " + err.Error()
+		a.setErr("vault sync: " + err.Error())
 	}
 	if _, err := vault.ArchiveTaskNote(path, a.archiveDir()); err != nil {
-		a.err = "vault archive: " + err.Error()
+		a.setErr("vault archive: " + err.Error())
 	}
 }
 
@@ -145,7 +145,7 @@ func (a *App) syncDailyNote() {
 		bodies = append(bodies, n.Body)
 	}
 	if _, err := vault.WriteDailyNote(a.resourcesDir(), a.now(), bodies); err != nil {
-		a.err = "daily note: " + err.Error()
+		a.setErr("daily note: " + err.Error())
 	}
 }
 

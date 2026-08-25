@@ -89,7 +89,7 @@ func (a *App) applySubtaskDeadline(r todayRow, due *time.Time, remind *time.Dura
 		meta.RemindAt, meta.HasRemind = a.now().Add(*remind), true
 	}
 	if err := vault.SetTaskSchedule(r.ticketPath, r.sub.Line, r.sub.Text, meta, a.loc); err != nil {
-		a.err = err.Error()
+		a.setErr(err.Error())
 		return false
 	}
 	a.needsReindex = true
@@ -108,7 +108,7 @@ func (a App) updateDeadlinePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "x":
 		a.applyDeadline(nil, nil)
 		a.picker.open = false
-		a.status = "deadline cleared"
+		a.setStatus("deadline cleared")
 		return a, a.reindexIfNeeded()
 	case "t":
 		return a.setPickerDue(deadline.InDays(now, 0), "today")
@@ -122,7 +122,7 @@ func (a App) updateDeadlinePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		d := time.Hour
 		a.applyDeadline(nil, &d)
 		a.picker.open = false
-		a.status = "reminder in 1 hour"
+		a.setStatus("reminder in 1 hour")
 		return a, a.reindexIfNeeded()
 	}
 
@@ -136,7 +136,7 @@ func (a App) updateDeadlinePicker(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 func (a App) setPickerDue(due time.Time, label string) (tea.Model, tea.Cmd) {
 	if a.applyDeadline(&due, nil) {
-		a.status = "due " + label
+		a.setStatus("due " + label)
 	}
 	a.picker.open = false
 	return a, a.reindexIfNeeded()

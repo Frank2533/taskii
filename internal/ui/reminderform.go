@@ -133,7 +133,7 @@ func (a App) updateReminderForm(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.form = reminderForm{}
 		a.picker.open = false
 		if a.applyDeadline(nil, &d) {
-			a.status = "reminder in " + phrase
+			a.setStatus("reminder in " + phrase)
 		}
 		return a, a.reindexIfNeeded()
 	}

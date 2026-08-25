@@ -46,7 +46,7 @@ func openURLCmd(url string) tea.Cmd {
 func (a App) openTicketLink() (tea.Model, tea.Cmd) {
 	t, ok := a.selectedTicket()
 	if !ok {
-		a.err = "no ticket selected"
+		a.setErr("no ticket selected")
 		return a, nil
 	}
 	url := t.Link
@@ -54,9 +54,9 @@ func (a App) openTicketLink() (tea.Model, tea.Cmd) {
 		url = t.PRLink
 	}
 	if url == "" {
-		a.err = "this ticket has no link set"
+		a.setErr("this ticket has no link set")
 		return a, nil
 	}
-	a.status = "opening " + url
+	a.setStatus("opening " + url)
 	return a, openURLCmd(url)
 }

@@ -151,7 +151,7 @@ func (a App) beginTaskNote() (tea.Model, tea.Cmd) {
 	case noteTargetNone:
 		return a, nil
 	case noteTargetUnsynced:
-		a.err = "notes on a task need Obsidian sync — turn it on in settings (,)"
+		a.setErr("notes on a task need Obsidian sync — turn it on in settings (,)")
 		return a, nil
 	}
 	a.noteFor = target
@@ -192,10 +192,10 @@ func (a App) updateTaskNote(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			err = vault.AppendUnderHeading(target.path, target.heading(), line)
 		}
 		if err != nil {
-			a.err = err.Error()
+			a.setErr(err.Error())
 			return a, loadIndex(a.vaultPath, a.loc)
 		}
-		a.status = "note added to " + target.name
+		a.setStatus("note added to " + target.name)
 		return a, loadIndex(a.vaultPath, a.loc)
 	}
 	a.input.Width = a.inputFieldWidth()

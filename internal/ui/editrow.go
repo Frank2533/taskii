@@ -98,7 +98,7 @@ func (a App) commitEditRow(raw string) (tea.Model, tea.Cmd) {
 		// A subtask lives in the vault note, so the edit goes there and the
 		// index is rebuilt from what actually landed.
 		if err := vault.SetCheckboxText(target.subPath, target.subLine, target.subText, text); err != nil {
-			a.err = err.Error()
+			a.setErr(err.Error())
 		}
 		return a, loadIndex(a.vaultPath, a.loc)
 	}
@@ -139,7 +139,7 @@ func (a App) beginAddSubtask() (tea.Model, tea.Cmd) {
 	}
 	r := rows[a.todaySelected]
 	if !r.task.IsTicket() {
-		a.err = "subtasks belong to a ticket — select one first"
+		a.setErr("subtasks belong to a ticket — select one first")
 		return a, nil
 	}
 	path := r.ticketPath
@@ -149,7 +149,7 @@ func (a App) beginAddSubtask() (tea.Model, tea.Cmd) {
 		}
 	}
 	if path == "" {
-		a.err = "could not find that ticket's note"
+		a.setErr("could not find that ticket's note")
 		return a, nil
 	}
 	a.editing = editTarget{subPath: path, subLine: -1}
@@ -180,7 +180,7 @@ func (a App) updateAddSubtask(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			return a, nil
 		}
 		if err := vault.AppendCheckbox(target.subPath, quickAddHeading, text); err != nil {
-			a.err = err.Error()
+			a.setErr(err.Error())
 			return a, nil
 		}
 		return a, loadIndex(a.vaultPath, a.loc)

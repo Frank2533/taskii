@@ -233,9 +233,9 @@ func (a App) beginEditEvent() (tea.Model, tea.Cmd) {
 	ev, ok := a.selectedEvent()
 	if !ok {
 		if _, onSomething := a.selectedEntry(); onSomething {
-			a.err = "only events are edited here — tasks and tickets are edited where they live"
+			a.setErr("only events are edited here — tasks and tickets are edited where they live")
 		} else {
-			a.err = "no event selected"
+			a.setErr("no event selected")
 		}
 		return a, nil
 	}
@@ -267,12 +267,12 @@ func (a App) updateEditEvent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		parsed, ok := parseEvent(text, a.now())
 		if !ok {
-			a.err = "an event needs a time range, e.g. 09:30-10:00"
+			a.setErr("an event needs a time range, e.g. 09:30-10:00")
 			return a, nil
 		}
 		original, ok := a.eventByID(id)
 		if !ok {
-			a.err = "that event no longer exists"
+			a.setErr("that event no longer exists")
 			return a, nil
 		}
 		if original.Repeat != model.RepeatNone {
@@ -294,10 +294,10 @@ func (a App) updateEditEvent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			if !a.noPersist {
 				_ = model.SaveEvents(a.events)
 			}
-			a.status = "updated " + parsed.Title
+			a.setStatus("updated " + parsed.Title)
 			return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc)
 		}
-		a.err = "that event no longer exists"
+		a.setErr("that event no longer exists")
 		return a, nil
 	}
 	var cmd tea.Cmd
@@ -318,7 +318,7 @@ func (a App) scopeOccurrence(ev model.Event) time.Time {
 func (a App) deleteSelectedEvent() (tea.Model, tea.Cmd) {
 	ev, ok := a.selectedEvent()
 	if !ok {
-		a.err = "no event selected"
+		a.setErr("no event selected")
 		return a, nil
 	}
 	if ev.Repeat != model.RepeatNone {
@@ -334,7 +334,7 @@ func (a App) deleteSelectedEvent() (tea.Model, tea.Cmd) {
 	if !a.noPersist {
 		_ = model.SaveEvents(a.events)
 	}
-	a.status = "deleted " + ev.Title
+	a.setStatus("deleted " + ev.Title)
 	return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc)
 }
 
@@ -363,14 +363,14 @@ func (a App) updateAddEvent(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 		ev, ok := parseEvent(text, a.now())
 		if !ok {
-			a.err = "an event needs a time range, e.g. 09:30-10:00"
+			a.setErr("an event needs a time range, e.g. 09:30-10:00")
 			return a, nil
 		}
 		a.events = append(a.events, ev)
 		if !a.noPersist {
 			_ = model.SaveEvents(a.events)
 		}
-		a.status = "added " + ev.Title
+		a.setStatus("added " + ev.Title)
 		return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc)
 	}
 	var cmd tea.Cmd

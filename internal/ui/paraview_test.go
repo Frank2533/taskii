@@ -1,6 +1,7 @@
 package ui
 
 import (
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
@@ -334,5 +335,80 @@ func TestReindexPicksUpDiskChanges(t *testing.T) {
 	app = press(t, app, "tab", "tab")
 	if !strings.Contains(app.View(), "brand new task") {
 		t.Errorf("reindex did not surface the new task:\n%s", app.View())
+	}
+}
+
+// r must actually surface something: previously indexMsg only updated a.idx,
+// with no status set on success and no way to tell reindexing had happened at
+// all if nothing visible had changed.
+func TestReindexReportsSuccess(t *testing.T) {
+	a := newTestApp(t, 150, 40)
+	idx, err := para.Scan(fixtureVault(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := a.Update(indexMsg{idx: idx})
+	got := m.(App)
+	if got.status == "" {
+		t.Error("a successful reindex left no status message")
+	}
+	if got.err != "" {
+		t.Errorf("a successful reindex left an error: %q", got.err)
+	}
+}
+
+func TestReindexReportsFailure(t *testing.T) {
+	a := newTestApp(t, 150, 40)
+	m, _ := a.Update(indexMsg{err: errors.New("boom")})
+	got := m.(App)
+	if got.err == "" {
+		t.Error("a failed reindex reported nothing")
+	}
+	if !strings.Contains(got.err, "boom") {
+		t.Errorf("err = %q, want it to include the underlying error", got.err)
+	}
+}
+
+// This is the actual reported bug: a leftover error from an earlier, wholly
+// unrelated action was masking every later success — including a real,
+// working reindex — because nothing anywhere cleared it. err always wins over
+// status in assemblePage, so once set it stuck until the app restarted.
+func TestSuccessClearsAStaleErrorFromAnEarlierAction(t *testing.T) {
+	a := newTestApp(t, 150, 40)
+	a.err = "no ticket has a link set" // stands in for any earlier failure
+	if !strings.Contains(a.View(), a.err) {
+		t.Fatal("test setup: the stale error is not even showing yet")
+	}
+
+	idx, err := para.Scan(fixtureVault(t), time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, _ := a.Update(indexMsg{idx: idx})
+	got := m.(App)
+
+	if got.err != "" {
+		t.Errorf("the stale error survived a later success: %q", got.err)
+	}
+	if strings.Contains(got.View(), "no ticket has a link set") {
+		t.Error("the stale error is still visible on screen after a success")
+	}
+	if got.status == "" || !strings.Contains(got.View(), got.status) {
+		t.Errorf("the new success message is not what is shown: status=%q", got.status)
+	}
+}
+
+// And the reverse: a new failure must not be hidden behind an old status
+// message either.
+func TestFailureClearsAStaleStatus(t *testing.T) {
+	a := newTestApp(t, 150, 40)
+	a.status = "opened https://example.com"
+	m, _ := a.Update(indexMsg{err: errors.New("vault unreadable")})
+	got := m.(App)
+	if got.status != "" {
+		t.Errorf("the stale status survived a later failure: %q", got.status)
+	}
+	if !strings.Contains(got.View(), "vault unreadable") {
+		t.Error("the new failure is not shown")
 	}
 }

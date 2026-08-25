@@ -402,16 +402,16 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case openURLMsg:
 		if msg.err != nil {
-			a.err = "could not open browser: " + msg.err.Error()
+			a.setErr("could not open browser: " + msg.err.Error())
 		} else {
-			a.status = "opened " + msg.url
+			a.setStatus("opened " + msg.url)
 		}
 		return a, nil
 
 	case pushFailedMsg:
 		// The desktop notification was already shown, so this reports a
 		// degraded delivery rather than a lost reminder.
-		a.err = "phone notification failed: " + msg.err.Error()
+		a.setErr("phone notification failed: " + msg.err.Error())
 		return a, nil
 
 	case reminderFiredMsg:
@@ -420,26 +420,38 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case indexMsg:
+		// Reindexing had no feedback at all: pressing r silently updated the
+		// index whether it changed anything visible or not, and a failure
+		// after the first successful load was easy to miss — it replaces the
+		// PARA pane's body, but nothing said to look there if a different
+		// view had focus. Both are now reported on the status line, the same
+		// as every other vault action.
 		a.idx, a.idxErr = msg.idx, msg.err
 		a.clampVaultSelections()
+		switch {
+		case msg.err != nil:
+			a.setErr("reindex failed: " + msg.err.Error())
+		case msg.idx != nil:
+			a.setStatus(fmt.Sprintf("reindexed: %d ticket(s), %d project(s)", len(msg.idx.Tickets), len(msg.idx.Projects)))
+		}
 		return a, nil
 
 	case actionMsg:
 		a.busy = ""
 		if msg.err != nil {
-			a.err = msg.label + ": " + msg.err.Error()
+			a.setErr(msg.label + ": " + msg.err.Error())
 			return a, nil
 		}
-		a.status = msg.label + " done"
+		a.setStatus(msg.label + " done")
 		// A plugin command may have rewritten the note, so re-read the vault
 		// rather than trusting the index we already hold.
 		return a, loadIndex(a.vaultPath, a.loc)
 
 	case icsMsg:
 		if msg.err != nil {
-			a.err = "calendar export: " + msg.err.Error()
+			a.setErr("calendar export: " + msg.err.Error())
 		} else if msg.wrote {
-			a.status = fmt.Sprintf("calendar: %d events written", msg.count)
+			a.setStatus(fmt.Sprintf("calendar: %d events written", msg.count))
 		}
 		return a, nil
 
@@ -745,7 +757,7 @@ func (a App) updateSimple(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "t":
 		name := cycleTheme()
-		a.status = "Theme: " + name
+		a.setStatus("Theme: " + name)
 		a.saveSettings()
 		return a, nil
 	}
@@ -954,8 +966,8 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			// The status bar sits directly under the picker, so a message
 			// left there by an earlier action reads as belonging to the
 			// selection.
-			a.status = ""
-			a.err = ""
+			a.setStatus("")
+			a.setErr("")
 		}
 		return a, nil
 
@@ -1042,13 +1054,13 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 
 	case "t":
 		name := cycleTheme()
-		a.status = "Theme: " + name
+		a.setStatus("Theme: " + name)
 		a.saveSettings()
 		return a, nil
 
 	case "L":
 		a.layout = a.layout.next()
-		a.status = "Layout: " + a.layout.String()
+		a.setStatus("Layout: " + a.layout.String())
 		// Selections can fall outside the new viewport: the layouts differ in
 		// pane height, so a row visible in one may not exist in another.
 		a.clampSelections()
@@ -1315,9 +1327,9 @@ func (a App) updateConfirmClearNotes(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		a.notesSelected = 0
 		a.notesScroll = 0
 		a.persistNotes()
-		a.status = "Notes cleared"
+		a.setStatus("Notes cleared")
 	default:
-		a.status = "Clear cancelled"
+		a.setStatus("Clear cancelled")
 	}
 	return a, nil
 }
@@ -1396,7 +1408,7 @@ func (a *App) persistNotes() {
 		return
 	}
 	if err := model.SaveNotes(a.notes); err != nil {
-		a.err = "failed to save notes: " + err.Error()
+		a.setErr("failed to save notes: " + err.Error())
 	}
 }
 
@@ -1738,7 +1750,7 @@ func (a App) updateConfirmDelete(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 	default:
 		a.mode = modeNormal
-		a.status = "Delete cancelled"
+		a.setStatus("Delete cancelled")
 		return a, nil
 	}
 }
@@ -1777,12 +1789,33 @@ func (a *App) deleteSelected() {
 	a.persist()
 }
 
+// setStatus records a success message and clears any earlier error.
+//
+// Without this, a stale failure from an unrelated action — Jira unreachable,
+// nothing selected, whatever — sat on the status line forever: err takes
+// priority over status in assemblePage, and nothing anywhere cleared it on a
+// later success. Every subsequent success would then render, be computed
+// correctly, and never be seen — which is exactly what reindexing looked like
+// if any earlier action that session had failed.
+func (a *App) setStatus(s string) {
+	a.status = s
+	a.err = ""
+}
+
+// setErr records a failure and clears any earlier success message, for the
+// same reason in reverse: whichever happened most recently is what the status
+// line should show.
+func (a *App) setErr(s string) {
+	a.err = s
+	a.status = ""
+}
+
 func (a *App) persist() {
 	if a.noPersist {
 		return
 	}
 	if err := model.Save(a.tasks); err != nil {
-		a.err = "failed to save tasks: " + err.Error()
+		a.setErr("failed to save tasks: " + err.Error())
 	}
 }
 

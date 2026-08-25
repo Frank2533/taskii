@@ -16,6 +16,23 @@ func (idx *Index) sort() {
 	sort.Slice(idx.Areas, func(i, j int) bool {
 		return idx.Areas[i].Name < idx.Areas[j].Name
 	})
+	sort.Slice(idx.LocalTasks, func(i, j int) bool {
+		if idx.LocalTasks[i].Done != idx.LocalTasks[j].Done {
+			return !idx.LocalTasks[i].Done
+		}
+		return strings.ToLower(idx.LocalTasks[i].Title) < strings.ToLower(idx.LocalTasks[j].Title)
+	})
+}
+
+// OpenLocalTasks returns unfinished local tasks.
+func (idx *Index) OpenLocalTasks() []LocalTask {
+	var out []LocalTask
+	for _, t := range idx.LocalTasks {
+		if !t.Done && !t.Archived {
+			out = append(out, t)
+		}
+	}
+	return out
 }
 
 // Ticket looks a ticket up by Jira key.

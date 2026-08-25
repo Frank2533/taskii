@@ -300,6 +300,10 @@ func (a App) openSelectedInObsidian() (tea.Model, tea.Cmd) {
 
 // jiraAction dispatches a plugin command against the selected ticket.
 func (a App) jiraAction(label string, fn func(*obsidian.Client, context.Context, string) (string, error)) (tea.Model, tea.Cmd) {
+	if !a.jiraEnabled {
+		a.err = "Jira is disabled — enable it in settings (,)"
+		return a, nil
+	}
 	if !a.obs.Available() {
 		a.err = a.obs.Unavailable()
 		return a, nil
@@ -343,7 +347,7 @@ func (a App) flushWorklog() (tea.Model, tea.Cmd) {
 	_ = a.wl.Save()
 	a.status = fmt.Sprintf("logged %s to %s", amount, t.Key)
 
-	if !a.worklogPush {
+	if !a.worklogPush || !a.jiraEnabled {
 		return a, loadIndex(a.vaultPath, a.loc)
 	}
 	if !a.obs.Available() {

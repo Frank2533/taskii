@@ -32,7 +32,7 @@ func (a App) keyReference() []keySection {
 
 	switch a.view {
 	case viewPARA:
-		return []keySection{
+		sections := []keySection{
 			{"Navigate", []keyRow{
 				{"tab / shift+tab", "move between panes"},
 				{"↑ ↓ / j k", "move the cursor"},
@@ -46,15 +46,22 @@ func (a App) keyReference() []keySection {
 				{"r", "reindex the vault"},
 				{"C", "export the calendar now"},
 			}},
-			{"Jira", []keyRow{
+		}
+		if a.jiraEnabled {
+			sections = append(sections, keySection{"Jira", []keyRow{
 				{"R", "fetch issues"},
 				{"s", "start a status transition"},
 				{"c", "add a comment"},
-				{"w", "write tracked time to the work log"},
 				{"p", "track pomodoro time against this ticket"},
-			}},
-			common,
+				{"w", "write tracked time to the work log"},
+			}})
+		} else {
+			sections = append(sections, keySection{"Time", []keyRow{
+				{"p", "track pomodoro time against this ticket"},
+				{"w", "write tracked time to the work log"},
+			}})
 		}
+		return append(sections, common)
 	case viewCalendar:
 		return []keySection{
 			{"Calendar", []keyRow{

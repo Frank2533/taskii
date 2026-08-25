@@ -55,6 +55,7 @@ const (
 	rowUnfiled
 	rowArea
 	rowProject
+	rowLocalTasks
 )
 
 // treeRow is one line in the navigator.
@@ -92,6 +93,9 @@ func (a App) treeRows() []treeRow {
 		// train the eye to ignore it, and this is the row that matters.
 		rows = append(rows, treeRow{kind: rowUnfiled, label: "Unfiled", count: n})
 	}
+	if n := len(a.idx.OpenLocalTasks()); n > 0 {
+		rows = append(rows, treeRow{kind: rowLocalTasks, label: "Local tasks", count: n})
+	}
 	for _, name := range a.idx.AreaNames() {
 		rows = append(rows, treeRow{
 			kind:  rowArea,
@@ -123,6 +127,8 @@ func (a App) visibleTickets() []para.Ticket {
 	sel := clamp(a.vault.treeSel, 0, len(rows)-1)
 	row := rows[sel]
 	switch row.kind {
+	case rowLocalTasks:
+		return localTasksAsTickets(a.idx.OpenLocalTasks())
 	case rowUnfiled:
 		return a.idx.Unfiled()
 	case rowArea:
@@ -153,6 +159,32 @@ func (a App) selectedCheckbox() (para.Checkbox, bool) {
 		return para.Checkbox{}, false
 	}
 	return t.Checkboxes[clamp(a.vault.detailSel, 0, len(t.Checkboxes)-1)], true
+}
+
+// localTasksAsTickets adapts local tasks for the ticket list and detail panes.
+//
+// They are shown through the same panes rather than given their own, because
+// everything those panes display — a title, a status, a set of task lines —
+// a local task also has. The adapter is display-only; nothing is written back
+// through it.
+func localTasksAsTickets(tasks []para.LocalTask) []para.Ticket {
+	out := make([]para.Ticket, 0, len(tasks))
+	for _, t := range tasks {
+		status := "Open"
+		if t.Done {
+			status = "Done"
+		}
+		out = append(out, para.Ticket{
+			Summary:    t.Title,
+			Status:     status,
+			IssueType:  "Local task",
+			Path:       t.Path,
+			Due:        t.Due,
+			HasDue:     t.HasDue,
+			Checkboxes: t.Checkboxes,
+		})
+	}
+	return out
 }
 
 func clamp(v, lo, hi int) int {
@@ -314,7 +346,7 @@ func (a App) renderTree(rows []treeRow, width, height int) string {
 			// Stranded tickets are the one thing here that needs action.
 			style = style.Foreground(colorWarning)
 		}
-		if r.kind == rowProject {
+		if r.kind == rowProject || r.kind == rowLocalTasks {
 			style = style.Foreground(colorPurple)
 		}
 		prefix := "  "

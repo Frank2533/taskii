@@ -93,6 +93,22 @@ type Project struct {
 	Checkboxes []Checkbox
 }
 
+// LocalTask is a task taskii created in the vault, as opposed to a ticket
+// mirrored from Jira. It is recognised by its taskii_id, wherever the note
+// lives, so moving or renaming it does not break the link.
+type LocalTask struct {
+	ID       string
+	Title    string
+	Done     bool
+	Path     string
+	Archived bool
+
+	Due    time.Time
+	HasDue bool
+
+	Checkboxes []Checkbox
+}
+
 // Area is one ongoing responsibility, one folder under Areas/.
 type Area struct {
 	Name string

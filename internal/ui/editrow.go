@@ -125,6 +125,7 @@ func (a App) commitEditRow(raw string) (tea.Model, tea.Cmd) {
 			a.tasks[i].Reminded = false
 		}
 		a.persist()
+		a.syncLocalTask(a.tasks[i].ID)
 		break
 	}
 	return a, nil

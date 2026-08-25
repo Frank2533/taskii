@@ -21,10 +21,13 @@ const (
 	fieldICSOutput
 	fieldICSInterval
 	fieldWorklogPush
+	fieldJira
+	fieldObsidianSync
+	fieldProjectFolder
 	fieldTheme
 	fieldLayout
 
-	settingsFieldCount = 7
+	settingsFieldCount = 10
 )
 
 // settingsState is the overlay's state. Theme and layout were previously only
@@ -50,6 +53,12 @@ func (f settingsField) label() string {
 		return "Export every"
 	case fieldWorklogPush:
 		return "Send worklog to Jira"
+	case fieldJira:
+		return "Jira integration"
+	case fieldObsidianSync:
+		return "Write to Obsidian"
+	case fieldProjectFolder:
+		return "Local task folder"
 	case fieldTheme:
 		return "Theme"
 	default:
@@ -69,6 +78,12 @@ func (f settingsField) help() string {
 		return "A duration like 15m. Set 0 to stop exporting in the background."
 	case fieldWorklogPush:
 		return "Off keeps tracked time local; on also sends it to the Jira issue."
+	case fieldJira:
+		return "Uses the jira-sync Obsidian plugin via the Obsidian CLI. Off hides every Jira action."
+	case fieldObsidianSync:
+		return "Off, taskii only reads the vault. On, it also writes local tasks and notes into it."
+	case fieldProjectFolder:
+		return "Vault folder for local task notes. Finished ones move to " + model.ArchiveLocalTasks + "."
 	default:
 		return "Enter to cycle."
 	}
@@ -106,6 +121,18 @@ func (a App) settingsValue(f settingsField) string {
 			return "on"
 		}
 		return "off"
+	case fieldJira:
+		if a.jiraEnabled {
+			return "enabled"
+		}
+		return "disabled"
+	case fieldObsidianSync:
+		if a.obsidianSync {
+			return "enabled"
+		}
+		return "disabled"
+	case fieldProjectFolder:
+		return s.Projects()
 	case fieldTheme:
 		return currentTheme().Name
 	default:
@@ -123,6 +150,9 @@ func (a App) settings() model.Settings {
 		ICSOutput:         a.icsSetting,
 		ICSInterval:       a.icsIntervalSetting,
 		WorklogPushToJira: a.worklogPush,
+		JiraDisabled:      !a.jiraEnabled,
+		ObsidianSync:      a.obsidianSync,
+		ProjectFolder:     a.projectFolder,
 	}
 }
 
@@ -205,6 +235,20 @@ func (a App) beginEditSetting() (tea.Model, tea.Cmd) {
 		a.worklogPush = !a.worklogPush
 		a.saveSettings()
 		return a, nil
+	case fieldJira:
+		a.jiraEnabled = !a.jiraEnabled
+		a.saveSettings()
+		return a, nil
+	case fieldObsidianSync:
+		a.obsidianSync = !a.obsidianSync
+		a.saveSettings()
+		if a.obsidianSync {
+			// Catch the vault up with what taskii already holds, rather than
+			// syncing only tasks touched from now on.
+			a.syncAllLocalTasks()
+			return a, loadIndex(a.vaultPath, a.loc)
+		}
+		return a, nil
 	case fieldTheme:
 		cycleTheme()
 		a.saveSettings()
@@ -231,6 +275,9 @@ func (a App) beginEditSetting() (tea.Model, tea.Cmd) {
 	case fieldICSInterval:
 		in.SetValue(a.icsIntervalSetting)
 		in.Placeholder = "15m"
+	case fieldProjectFolder:
+		in.SetValue(a.projectFolder)
+		in.Placeholder = model.DefaultProjectFolder
 	}
 	in.Focus()
 	a.settingsUI.input = in
@@ -270,6 +317,9 @@ func (a App) commitSetting(raw string) (tea.Model, tea.Cmd) {
 	case fieldICSOutput:
 		a.icsSetting = value
 		a.icsOut = a.resolveICSPath()
+
+	case fieldProjectFolder:
+		a.projectFolder = value
 
 	case fieldICSInterval:
 		if value != "" {

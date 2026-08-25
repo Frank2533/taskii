@@ -219,12 +219,13 @@ func parseCheckbox(trimmed string) (done bool, text string, ok bool) {
 
 // Index is a whole vault, parsed.
 type Index struct {
-	Vault     string
-	Tickets   []Ticket
-	Projects  []Project
-	Areas     []Area
-	ScannedAt time.Time
-	Loc       *time.Location
+	Vault      string
+	Tickets    []Ticket
+	Projects   []Project
+	Areas      []Area
+	LocalTasks []LocalTask
+	ScannedAt  time.Time
+	Loc        *time.Location
 }
 
 // Scan walks the vault and builds an index. loc governs how bare dates are
@@ -277,6 +278,15 @@ func Scan(vault string, loc *time.Location) (*Index, error) {
 			return nil
 		}
 
+		// A note carrying a taskii_id is one of ours, wherever it sits: the
+		// folder is configurable and the note gets moved when it is finished,
+		// so neither location is a reliable way to recognise it.
+		if lt, ok := readLocalTask(path, loc); ok {
+			lt.Archived = parts[0] == dirArchive
+			idx.LocalTasks = append(idx.LocalTasks, lt)
+			return nil
+		}
+
 		switch parts[0] {
 		case dirTickets:
 			if t, ok := readTicket(path, loc, false); ok {
@@ -314,6 +324,31 @@ func Scan(vault string, loc *time.Location) (*Index, error) {
 	}
 	idx.sort()
 	return idx, nil
+}
+
+// readLocalTask reads a note if it is a taskii-created task.
+func readLocalTask(path string, loc *time.Location) (LocalTask, bool) {
+	n, err := ParseNote(path)
+	if err != nil {
+		return LocalTask{}, false
+	}
+	id := field(n.Front, "taskii_id")
+	if id == "" {
+		return LocalTask{}, false
+	}
+	title := field(n.Front, "title")
+	if title == "" {
+		title = strings.TrimSuffix(filepath.Base(path), filepath.Ext(path))
+	}
+	lt := LocalTask{
+		ID:         id,
+		Title:      title,
+		Done:       strings.EqualFold(field(n.Front, "status"), "done"),
+		Path:       path,
+		Checkboxes: checkboxes(n),
+	}
+	lt.Due, lt.HasDue = parseDate(n.Front["due"], loc)
+	return lt, true
 }
 
 func readTicket(path string, loc *time.Location, archived bool) (Ticket, bool) {

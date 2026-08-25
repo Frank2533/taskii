@@ -34,6 +34,21 @@ type Settings struct {
 	// background exporter.
 	ICSInterval string `json:"ics_interval,omitempty"`
 
+	// JiraDisabled turns off every Jira-backed action and hides them from the
+	// UI. It is stored inverted so that an existing settings file, and a
+	// fresh install, both start with Jira available — the zero value of a new
+	// bool would otherwise silently switch it off for anyone upgrading.
+	JiraDisabled bool `json:"jira_disabled,omitempty"`
+
+	// ObsidianSync opts in to taskii writing local tasks and notes into the
+	// vault. It defaults off: everything else in the app reads the vault or
+	// edits notes the user pointed at, whereas this creates and moves notes
+	// on its own, which should never begin without being asked for.
+	ObsidianSync bool `json:"obsidian_sync,omitempty"`
+
+	// ProjectFolder is the vault folder local task notes are written to.
+	ProjectFolder string `json:"project_folder,omitempty"`
+
 	// WorklogPushToJira opts in to sending tracked time to Jira. Off by
 	// default: time is accrued locally and written to the note's freeform
 	// work-log section, and nothing reaches Jira unless this is enabled.
@@ -80,6 +95,23 @@ func (s Settings) ICSEvery() time.Duration {
 	}
 	return d
 }
+
+// JiraEnabled reports whether Jira-backed features are available.
+func (s Settings) JiraEnabled() bool { return !s.JiraDisabled }
+
+// DefaultProjectFolder is where local task notes go when nothing is set.
+const DefaultProjectFolder = "Projects"
+
+// Projects is the folder local task notes are written to.
+func (s Settings) Projects() string {
+	if s.ProjectFolder == "" {
+		return DefaultProjectFolder
+	}
+	return s.ProjectFolder
+}
+
+// ArchiveLocalTasks is where a finished local task's note is moved.
+const ArchiveLocalTasks = "Archive/Local Tasks"
 
 func LoadSettings() (Settings, error) {
 	b, err := readData(settingsFile)

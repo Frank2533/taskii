@@ -9,6 +9,7 @@ import (
 
 	tea "github.com/charmbracelet/bubbletea"
 
+	"taskii/internal/model"
 	"taskii/internal/para"
 )
 
@@ -17,6 +18,10 @@ import (
 func dashApp(t *testing.T) (App, string) {
 	t.Helper()
 	root := fixtureVault(t)
+	// Point persistence at a scratch directory: these tests exercise the
+	// non-mock save path, and must never touch the developer's real data.
+	model.SetDataDir(t.TempDir())
+	t.Cleanup(func() { model.SetDataDir("") })
 	a := NewApp(Options{Mock: true, Vault: root, Location: time.UTC})
 	a.loc = time.UTC
 	// Mock seeds sample tasks for screenshots; clear them so row indices in
@@ -349,5 +354,85 @@ func TestSuggestionsShowTicketStatus(t *testing.T) {
 	a = typeInto(a, "normalize")
 	if !strings.Contains(a.View(), "[In Progress]") {
 		t.Errorf("suggestion does not show status:\n%s", a.View())
+	}
+}
+
+// With sync on, a local task becomes a note in the vault and shows up in the
+// PARA view alongside the tickets.
+func TestLocalTaskSyncsToVaultAndAppearsInPara(t *testing.T) {
+	a, root := dashApp(t)
+	a.noPersist = false // the sync path is skipped for mock runs
+	a.obsidianSync = true
+	a.projectFolder = "Projects"
+
+	a = press(t, a, "a")
+	a = typeInto(a, "buy oat milk")
+	a = press(t, a, "enter")
+	if a.err != "" {
+		t.Fatalf("add reported: %s", a.err)
+	}
+
+	notePath := filepath.Join(root, "Projects", "buy oat milk.md")
+	body, err := os.ReadFile(notePath)
+	if err != nil {
+		t.Fatalf("no note written: %v", err)
+	}
+	if !strings.Contains(string(body), "taskii_id:") {
+		t.Errorf("note has no id:\n%s", body)
+	}
+
+	// It should now be indexed as a local task and visible in PARA.
+	idx, err := para.Scan(root, time.UTC)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(idx.OpenLocalTasks()) != 1 {
+		t.Fatalf("local tasks = %d, want 1", len(idx.OpenLocalTasks()))
+	}
+	m, _ := a.Update(indexMsg{idx: idx})
+	app := press(t, m.(App), "2")
+	if !strings.Contains(app.View(), "Local tasks") {
+		t.Errorf("PARA view has no local tasks row:\n%s", app.View())
+	}
+}
+
+// Finishing a local task moves its note to the archive, which the vault's own
+// mover would never do because its rules only watch the tickets folder.
+func TestFinishingALocalTaskArchivesItsNote(t *testing.T) {
+	a, root := dashApp(t)
+	a.noPersist = false
+	a.obsidianSync = true
+	a.projectFolder = "Projects"
+
+	a = press(t, a, "a")
+	a = typeInto(a, "ship it")
+	a = press(t, a, "enter")
+
+	a.todaySelected = 0
+	a = press(t, a, "space")
+	if a.err != "" {
+		t.Fatalf("toggle reported: %s", a.err)
+	}
+
+	if _, err := os.Stat(filepath.Join(root, "Projects", "ship it.md")); !os.IsNotExist(err) {
+		t.Error("the note is still in the working folder")
+	}
+	if _, err := os.Stat(filepath.Join(root, "Archive", "Local Tasks", "ship it.md")); err != nil {
+		t.Errorf("the note was not archived: %v", err)
+	}
+}
+
+// Sync is opt-in: with it off, nothing may be written to the vault.
+func TestNothingIsWrittenWhenSyncIsOff(t *testing.T) {
+	a, root := dashApp(t)
+	a.noPersist = false
+	a.obsidianSync = false
+
+	a = press(t, a, "a")
+	a = typeInto(a, "buy oat milk")
+	a = press(t, a, "enter")
+
+	if _, err := os.Stat(filepath.Join(root, "Projects", "buy oat milk.md")); !os.IsNotExist(err) {
+		t.Error("a note was written despite sync being disabled")
 	}
 }

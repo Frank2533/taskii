@@ -158,7 +158,11 @@ func (a App) toggleTodayRow() (App, bool) {
 	}
 	r := rows[a.todaySelected]
 	if !r.isSub {
-		a.toggleSelected()
+		// Toggle by ID, not by index. Today addresses rows while the task
+		// list addresses tasks, and an expanded ticket makes the two diverge
+		// — resolving by position would tick a different task than the one
+		// under the cursor.
+		a.toggleTaskByID(r.task.ID)
 		return a, false
 	}
 	if err := vault.SetCheckbox(r.ticketPath, r.sub.Line, r.sub.Text, !r.sub.Done); err != nil {
@@ -166,6 +170,20 @@ func (a App) toggleTodayRow() (App, bool) {
 	}
 	// Reindex either way: a refusal means our picture of the note is stale.
 	return a, true
+}
+
+// selectedTodayTaskID is the task under the cursor, "" when the cursor is on a
+// subtask or nothing is selected. Row and task indices differ once a ticket is
+// expanded, so every action on the Today pane resolves through this.
+func (a App) selectedTodayTaskID() string {
+	rows := a.todayRows()
+	if a.todaySelected < 0 || a.todaySelected >= len(rows) {
+		return ""
+	}
+	if rows[a.todaySelected].isSub {
+		return ""
+	}
+	return rows[a.todaySelected].task.ID
 }
 
 // toggleCollapseTodayRow folds or unfolds the ticket under the cursor.

@@ -47,6 +47,11 @@ type Task struct {
 
 	// Collapsed hides a ticket's subtasks in the dashboard.
 	Collapsed bool `json:"collapsed,omitempty"`
+
+	// NotePath is this task's note in the vault, when Obsidian sync is on.
+	// Cached so the note can be found without rescanning, and re-resolved by
+	// taskii_id whenever it turns out to be wrong.
+	NotePath string `json:"note_path,omitempty"`
 }
 
 // IsTicket reports whether this row stands for a vault ticket.

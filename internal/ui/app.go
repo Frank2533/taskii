@@ -173,6 +173,9 @@ type App struct {
 	icsSetting         string
 	icsIntervalSetting string
 	worklogPush        bool
+	jiraEnabled        bool
+	obsidianSync       bool
+	projectFolder      string
 }
 
 // Options configures NewApp for non-default startup modes.
@@ -291,6 +294,9 @@ func NewApp(opts Options) App {
 		icsSetting:         settings.ICSOutput,
 		icsIntervalSetting: settings.ICSInterval,
 		worklogPush:        settings.WorklogPushToJira,
+		jiraEnabled:        settings.JiraEnabled(),
+		obsidianSync:       settings.ObsidianSync,
+		projectFolder:      settings.ProjectFolder,
 
 		icsOut:   icsOut,
 		icsEvery: settings.ICSEvery(),
@@ -621,6 +627,7 @@ func (a *App) toggleTaskByID(id string) {
 			} else {
 				a.tasks[i].DoneAt = nil
 			}
+			defer a.syncLocalTask(a.tasks[i].ID)
 			a.persist()
 			return
 		}
@@ -1175,6 +1182,7 @@ func (a *App) deleteSelectedNote() {
 }
 
 func (a *App) persistNotes() {
+	defer a.syncDailyNote()
 	if a.noPersist {
 		return
 	}
@@ -1255,6 +1263,7 @@ func (a *App) addTask(raw string) {
 
 	a.tasks = append(a.tasks, t)
 	a.persist()
+	a.syncLocalTask(t.ID)
 	a.selectTaskByID(t.ID)
 }
 
@@ -1423,13 +1432,28 @@ func (a *App) clampSelections() {
 	a.syncScroll()
 }
 
-func (a *App) toggleSelected() {
+// actionTaskID is the task a keystroke applies to in the focused pane.
+//
+// Today addresses rows and the other panes address tasks, so this is the one
+// place that difference is resolved; acting on a raw index would hit the wrong
+// task whenever a ticket is expanded.
+func (a App) actionTaskID() string {
+	if a.focus == focusToday {
+		return a.selectedTodayTaskID()
+	}
 	list := a.currentList()
 	sel := a.currentSelected()
 	if sel < 0 || sel >= len(list) {
+		return ""
+	}
+	return list[sel].ID
+}
+
+func (a *App) toggleSelected() {
+	id := a.actionTaskID()
+	if id == "" {
 		return
 	}
-	id := list[sel].ID
 	for i := range a.tasks {
 		if a.tasks[i].ID == id {
 			a.tasks[i].Done = !a.tasks[i].Done
@@ -1446,12 +1470,10 @@ func (a *App) toggleSelected() {
 }
 
 func (a *App) toggleImportantSelected() {
-	list := a.currentList()
-	sel := a.currentSelected()
-	if sel < 0 || sel >= len(list) {
+	id := a.actionTaskID()
+	if id == "" {
 		return
 	}
-	id := list[sel].ID
 	for i := range a.tasks {
 		if a.tasks[i].ID == id {
 			a.tasks[i].Important = !a.tasks[i].Important
@@ -1671,6 +1693,15 @@ func (a App) overdueTasks() []model.Task {
 	return a.applyFilters(out)
 }
 
+// jiraHelpGroup hides Jira keys when the integration is off, rather than
+// advertising bindings that would only report that it is disabled.
+func jiraHelpGroup(enabled bool) helpGroup {
+	if !enabled {
+		return helpGroup{"Time", []helpKey{{"w", "log time"}}}
+	}
+	return helpGroup{"Jira", []helpKey{{"R", "fetch"}, {"s", "status"}, {"c", "comment"}, {"w", "log time"}}}
+}
+
 func (a App) helpGroups() []helpGroup {
 	if a.simple && a.mode == modeNormal {
 		what := "task"
@@ -1704,7 +1735,7 @@ func (a App) helpGroups() []helpGroup {
 			{"View", []helpKey{{"1/2/3", "views"}, {",", "settings"}, {"?", "all keys"}}},
 			{"Move", []helpKey{{"tab", "pane"}, {"↑/↓ j/k", "select"}, {"enter", "toggle"}}},
 			{"Vault", []helpKey{{"a", "add task"}, {"n", "add note"}, {"u", "set area"}, {"o", "open"}, {"r", "reindex"}}},
-			{"Jira", []helpKey{{"R", "fetch"}, {"s", "status"}, {"c", "comment"}, {"w", "log time"}}},
+			jiraHelpGroup(a.jiraEnabled),
 			{"", []helpKey{{"p", "track time"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}
 	case viewCalendar, viewTimeline:

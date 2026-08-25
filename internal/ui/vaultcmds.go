@@ -65,18 +65,20 @@ func runAction(label string, fn func(context.Context) (string, error)) tea.Cmd {
 // The index is scanned fresh rather than reusing the UI's copy: the export can
 // fire from a timer minutes after the last keystroke, and writing a stale
 // calendar into a synced folder is worse than spending a few milliseconds.
-func exportICS(vault, out string, tasks []model.Task, loc *time.Location) tea.Cmd {
+func exportICS(vault, out string, tasks []model.Task, events []model.Event, loc *time.Location) tea.Cmd {
 	if vault == "" || out == "" {
 		return nil
 	}
 	snapshot := make([]model.Task, len(tasks))
 	copy(snapshot, tasks)
+	eventSnapshot := make([]model.Event, len(events))
+	copy(eventSnapshot, events)
 	return func() tea.Msg {
 		idx, err := para.Scan(vault, loc)
 		if err != nil {
 			return icsMsg{path: out, err: err}
 		}
-		cal := export.Calendar(filepath.Base(vault), idx, snapshot, loc)
+		cal := export.Calendar(filepath.Base(vault), idx, snapshot, eventSnapshot, loc)
 		wrote, err := ics.WriteIfChanged(out, cal.Render())
 		return icsMsg{path: out, wrote: wrote, count: len(cal.Events), err: err}
 	}

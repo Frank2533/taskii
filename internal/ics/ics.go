@@ -47,6 +47,12 @@ type Event struct {
 	URL         string
 	Categories  []string
 
+	// RRule is an RFC 5545 recurrence rule without the "RRULE:" prefix,
+	// empty for a one-off. A repeating event is emitted once with its rule
+	// rather than expanded, so a subscriber's calendar keeps the series
+	// intact instead of receiving hundreds of unrelated entries.
+	RRule string
+
 	// Stamp is DTSTAMP. Callers should pass something derived from the source
 	// note (its updated time), never the current clock, or every export
 	// rewrites the file.
@@ -123,6 +129,9 @@ func (c *Calendar) Render() []byte {
 			}
 			line("DTSTART:" + utcStamp(start))
 			line("DTEND:" + utcStamp(end))
+		}
+		if e.RRule != "" {
+			line("RRULE:" + e.RRule)
 		}
 		line("SUMMARY:" + escape(e.Summary))
 		if e.Description != "" {

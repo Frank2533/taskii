@@ -113,9 +113,13 @@ func runICS(args []string) error {
 	if err != nil {
 		return fmt.Errorf("loading tasks: %w", err)
 	}
+	events, err := model.LoadEvents()
+	if err != nil {
+		return fmt.Errorf("loading events: %w", err)
+	}
 
 	target := ICSPath(*out, settings, vaultPath)
-	cal := export.Calendar(filepath.Base(vaultPath), idx, tasks, loc)
+	cal := export.Calendar(filepath.Base(vaultPath), idx, tasks, events, loc)
 	wrote, err := ics.WriteIfChanged(target, cal.Render())
 	if err != nil {
 		return fmt.Errorf("writing %s: %w", target, err)

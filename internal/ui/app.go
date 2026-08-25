@@ -50,6 +50,8 @@ const (
 	modeEditRow
 	// modeAddSubtask adds a task line to the selected ticket's note.
 	modeAddSubtask
+	// modeAddEvent adds a calendar event.
+	modeAddEvent
 )
 
 const dateFormat = "2006-01-02"
@@ -159,6 +161,15 @@ type App struct {
 	// picker is the one-keystroke deadline chooser.
 	picker deadlinePicker
 
+	// events are calendar entries: time that is spoken for, as opposed to
+	// tasks, which are work to finish.
+	events []model.Event
+
+	// calScale and calCursor are the calendar's zoom level and the day it is
+	// anchored on.
+	calScale  calScale
+	calCursor time.Time
+
 	// editing is what an in-progress edit applies to.
 	editing editTarget
 
@@ -226,6 +237,11 @@ func NewApp(opts Options) App {
 		loc = settings.Location()
 	}
 
+	var events []model.Event
+	if !opts.Mock {
+		events, _ = model.LoadEvents()
+	}
+
 	// Tracked time is a local record, so a mock run must not touch it.
 	wl := &worklog.Log{Entries: map[string]*worklog.Entry{}}
 	if !opts.Mock {
@@ -288,6 +304,7 @@ func NewApp(opts Options) App {
 		loc:       loc,
 		obs:       obsidian.New(opts.Vault),
 		wl:        wl,
+		events:    events,
 
 		tzSetting:          settings.Timezone,
 		vaultSetting:       settings.VaultPath,
@@ -367,7 +384,7 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	case icsTickMsg:
 		return a, tea.Batch(
-			exportICS(a.vaultPath, a.icsOut, a.tasks, a.loc),
+			exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc),
 			icsTick(a.icsEvery),
 		)
 
@@ -392,6 +409,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return a.updateEditRow(msg)
 		case modeAddSubtask:
 			return a.updateAddSubtask(msg)
+		case modeAddEvent:
+			return a.updateAddEvent(msg)
 		case modeAdding:
 			return a.updateAdding(msg)
 		case modeConfirmDelete:
@@ -444,9 +463,45 @@ func (a App) updateCalendar(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "r":
 		return a, loadIndex(a.vaultPath, a.loc)
 	case "C":
-		return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.loc)
+		return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc)
+	case "a":
+		return a.beginAddEvent()
+	case "w":
+		a.calScale = calWeek
+		return a, nil
+	case "m":
+		a.calScale = calMonth
+		return a, nil
+	case "y":
+		a.calScale = calYear
+		return a, nil
+	case "T":
+		a.calCursor = a.now()
+		return a, nil
+	case "left", "h", "up", "k":
+		a.calCursor = a.shiftCalendar(-1)
+		return a, nil
+	case "right", "l", "down", "j":
+		a.calCursor = a.shiftCalendar(1)
+		return a, nil
 	}
 	return a, nil
+}
+
+// shiftCalendar moves the cursor by one period of the current scale.
+func (a App) shiftCalendar(n int) time.Time {
+	cur := a.calCursor
+	if cur.IsZero() {
+		cur = a.now()
+	}
+	switch a.calScale {
+	case calWeek:
+		return cur.AddDate(0, 0, 7*n)
+	case calMonth:
+		return cur.AddDate(0, n, 0)
+	default:
+		return cur.AddDate(n, 0, 0)
+	}
 }
 
 // updateVaultAdding handles the quick-add input for a note checkbox.
@@ -1736,9 +1791,16 @@ func (a App) helpGroups() []helpGroup {
 			{"", []helpKey{{"p", "track time"}, {"C", "export .ics"}, {"q", "quit"}}},
 		}
 	case viewCalendar:
+		if a.mode == modeAddEvent {
+			return []helpGroup{{"", []helpKey{
+				{"enter", "add"}, {"esc", "cancel"},
+				{"", "title 09:30-10:00 !tmr weekly"},
+			}}}
+		}
 		return []helpGroup{
-			{"View", []helpKey{{"1/2/3", "views"}, {",", "settings"}, {"?", "all keys"}}},
-			{"", []helpKey{{"r", "reindex"}, {"C", "export .ics"}, {"q", "quit"}}},
+			{"Calendar", []helpKey{{"w/m/y", "week/month/year"}, {"←/→", "prev/next"}, {"T", "today"}}},
+			{"", []helpKey{{"a", "add event"}, {"r", "reindex"}, {"C", "export .ics"}}},
+			{"View", []helpKey{{"1/2/3", "views"}, {",", "settings"}, {"?", "all keys"}, {"q", "quit"}}},
 		}
 	}
 
@@ -1934,7 +1996,7 @@ func (a App) View() string {
 	case viewPARA:
 		return a.assemblePage(a.renderPara(), helpLine)
 	case viewCalendar:
-		return a.assemblePage(a.renderCalendar(), helpLine)
+		return a.assemblePage(a.renderCalendarGrid(), helpLine)
 	}
 
 	g := a.geometry()

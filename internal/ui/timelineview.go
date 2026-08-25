@@ -9,13 +9,15 @@ import (
 	"github.com/charmbracelet/lipgloss"
 
 	"taskii/internal/deadline"
+	"taskii/internal/model"
 )
 
 // timelineKind orders what shares an hour, most urgent first.
 type timelineKind int
 
 const (
-	tlAppointment timelineKind = iota
+	tlEvent timelineKind = iota
+	tlAppointment
 	tlReminder
 	tlDeadline
 )
@@ -30,6 +32,8 @@ type timelineItem struct {
 
 func (k timelineKind) glyph() string {
 	switch k {
+	case tlEvent:
+		return "▪"
 	case tlAppointment:
 		return "▸"
 	case tlReminder:
@@ -41,7 +45,7 @@ func (k timelineKind) glyph() string {
 
 func (k timelineKind) label() string {
 	switch k {
-	case tlAppointment:
+	case tlEvent, tlAppointment:
 		return ""
 	case tlReminder:
 		return "start: "
@@ -88,6 +92,17 @@ func (a App) timelineItems() (items []timelineItem, anytime int) {
 		if !timed && t.Date == now.Format(dateFormat) {
 			anytime++
 		}
+	}
+
+	// Calendar events occupy time whether or not any task is attached, so
+	// they belong on the same scale as everything else happening today.
+	for _, o := range model.EventsOccurring(a.events, today, tomorrow) {
+		items = append(items, timelineItem{
+			at:   o.Start.In(now.Location()),
+			kind: tlEvent,
+			text: o.Event.Title + " (" + o.Start.In(now.Location()).Format("15:04") + "-" + o.End.In(now.Location()).Format("15:04") + ")",
+			late: o.End.Before(now),
+		})
 	}
 
 	// Vault tickets due today are deadlines too; they carry a date but no

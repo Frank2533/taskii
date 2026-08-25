@@ -16,7 +16,7 @@ import (
 // DTSTAMP comes from each source note's updated time rather than the clock, so
 // re-exporting an unchanged vault produces an identical file — see the note on
 // determinism in package ics.
-func Calendar(name string, idx *para.Index, tasks []model.Task, loc *time.Location) *ics.Calendar {
+func Calendar(name string, idx *para.Index, tasks []model.Task, events []model.Event, loc *time.Location) *ics.Calendar {
 	if loc == nil {
 		loc = time.Local
 	}
@@ -49,6 +49,24 @@ func Calendar(name string, idx *para.Index, tasks []model.Task, loc *time.Locati
 				Categories: categories("Project", p.Area),
 			})
 		}
+	}
+	for _, e := range events {
+		start := e.Start.In(loc)
+		end := e.End
+		if end.IsZero() {
+			end = start.Add(e.Duration())
+		}
+		cal.Events = append(cal.Events, ics.Event{
+			UID:         ics.UID("event", e.ID),
+			Summary:     e.Title,
+			Start:       start,
+			End:         end.In(loc),
+			AllDay:      e.AllDay,
+			Description: e.Notes,
+			Categories:  categories("Event", ""),
+			RRule:       e.RRule(),
+			Stamp:       e.Start,
+		})
 	}
 	for _, t := range tasks {
 		if !t.IsAppointment() || t.Done {

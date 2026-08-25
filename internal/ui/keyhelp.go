@@ -65,8 +65,18 @@ func (a App) keyReference() []keySection {
 	case viewCalendar:
 		return []keySection{
 			{"Calendar", []keyRow{
+				{"w / m / y", "week, month or year"},
+				{"← →  h l", "previous / next period"},
+				{"T", "jump to today"},
+				{"a", "add an event"},
 				{"r", "reindex the vault"},
 				{"C", "export the calendar now"},
+			}},
+			{"Event syntax", []keyRow{
+				{"09:30-10:00", "start and end (required)"},
+				{"!tmr !2d !fri", "which day (today if omitted)"},
+				{"daily weekly", "monthly, yearly"},
+				{"x2", "every other period"},
 			}},
 			common,
 		}

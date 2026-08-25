@@ -82,7 +82,7 @@ func (a App) updatePara(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, loadIndex(a.vaultPath, a.loc)
 
 	case "C":
-		return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.loc)
+		return a, exportICS(a.vaultPath, a.icsOut, a.tasks, a.events, a.loc)
 
 	case "R":
 		return a.jiraAction("fetch from Jira", func(c *obsidian.Client, ctx context.Context, _ string) (string, error) {

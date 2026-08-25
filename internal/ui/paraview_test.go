@@ -117,17 +117,76 @@ func TestParaViewAdaptsToNarrowTerminals(t *testing.T) {
 	}
 }
 
-func TestCalendarViewListsDueDates(t *testing.T) {
+func TestCalendarViewShowsDatedWork(t *testing.T) {
 	a := press(t, newTestApp(t, 150, 40), "3")
 	if a.view != viewCalendar {
 		t.Fatalf("view = %v, want Calendar", a.view)
 	}
-	out := a.View()
-	if !strings.Contains(out, "normalize cities") {
-		t.Errorf("calendar missing the dated ticket:\n%s", out)
+	// The fixture ticket is due 2026-08-25; anchor the calendar there rather
+	// than on whatever today happens to be when the suite runs.
+	a.calCursor = time.Date(2026, 8, 25, 12, 0, 0, 0, time.UTC)
+
+	from, to := a.calRange()
+	entries := a.calendarEntries(from, to)
+	if len(entries) == 0 {
+		t.Fatalf("no entries for the week of the due date (%s to %s)", from, to)
 	}
-	if !strings.Contains(out, "25 Aug") {
-		t.Errorf("calendar missing the due day:\n%s", out)
+	var found bool
+	for _, e := range entries {
+		if strings.Contains(e.title, "normalize cities") {
+			found = true
+		}
+	}
+	if !found {
+		t.Errorf("the dated ticket is not on the calendar: %+v", entries)
+	}
+
+	out := a.View()
+	if !strings.Contains(out, "Mon") || !strings.Contains(out, "Sun") {
+		t.Errorf("week grid has no weekday header:\n%s", out)
+	}
+}
+
+func TestCalendarScalesSwitch(t *testing.T) {
+	a := press(t, newTestApp(t, 150, 40), "3")
+	for _, c := range []struct {
+		key  string
+		want calScale
+	}{{"w", calWeek}, {"m", calMonth}, {"y", calYear}} {
+		a = press(t, a, c.key)
+		if a.calScale != c.want {
+			t.Errorf("%q gave scale %v, want %v", c.key, a.calScale, c.want)
+		}
+	}
+	// The year view answers "when is it busy", so it names months.
+	if !strings.Contains(a.View(), "January") {
+		t.Errorf("year view does not list months:\n%s", a.View())
+	}
+}
+
+// A cell that shows two of five items and says nothing about the rest reads as
+// a complete list.
+func TestDayCellReportsWhatItCannotShow(t *testing.T) {
+	a := newTestApp(t, 150, 40)
+	day := startOfDay(a.now())
+	var entries []calEntry
+	for i := 0; i < 5; i++ {
+		entries = append(entries, calEntry{at: day, title: "item " + itoa(i)})
+	}
+	rows := a.dayCell(day, entries, 20, 4, false)
+	joined := strings.Join(rows, "\n")
+	if !strings.Contains(joined, "+") || !strings.Contains(joined, "more") {
+		t.Errorf("overflow not reported:\n%s", joined)
+	}
+}
+
+// The subtask count rides in brackets after the title.
+func TestDayCellShowsSubtaskCount(t *testing.T) {
+	a := newTestApp(t, 150, 40)
+	day := startOfDay(a.now())
+	rows := a.dayCell(day, []calEntry{{at: day, title: "ticket", subs: 3}}, 30, 4, false)
+	if !strings.Contains(strings.Join(rows, "\n"), "(3)") {
+		t.Errorf("subtask count missing:\n%s", strings.Join(rows, "\n"))
 	}
 }
 

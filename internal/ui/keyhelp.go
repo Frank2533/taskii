@@ -95,8 +95,9 @@ func (a App) keyReference() []keySection {
 	}
 
 	return []keySection{
-		{"Tasks", []keyRow{
-			{"a", "add a task (type a ticket summary to attach one)"},
+		{"Tasks (Today and Overdue)", []keyRow{
+			{"a", "add a task — Today only (type a ticket summary to attach one)"},
+			{"T", "move a carried-over task back to today — Overdue only"},
 			{"A", "add a subtask to the selected ticket"},
 			{"N", "add a note about the task or subtask"},
 			{"e", "edit the task or subtask under the cursor"},

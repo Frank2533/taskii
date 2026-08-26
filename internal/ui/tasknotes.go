@@ -47,15 +47,17 @@ func (a App) noteTarget() noteTarget {
 		return noteTarget{}
 	}
 
-	if a.focus == focusToday {
-		rows := a.todayRows()
-		if a.todaySelected >= 0 && a.todaySelected < len(rows) {
-			if r := rows[a.todaySelected]; r.isSub {
-				return noteTarget{
-					kind: noteTargetSubtask, name: r.sub.Text,
-					path: r.ticketPath, line: r.sub.Line, text: r.sub.Text,
-					existing: r.sub.Notes,
-				}
+	// Today and Overdue are both row-based, so a note on a subtask is found
+	// the same way in either — a carried-over ticket's subtasks are exactly
+	// as note-able as when it was still in Today.
+	rows := a.rowsFor(a.focus)
+	sel := a.currentSelected()
+	if sel >= 0 && sel < len(rows) {
+		if r := rows[sel]; r.isSub {
+			return noteTarget{
+				kind: noteTargetSubtask, name: r.sub.Text,
+				path: r.ticketPath, line: r.sub.Line, text: r.sub.Text,
+				existing: r.sub.Notes,
 			}
 		}
 	}

@@ -253,4 +253,8 @@ func TestRealVault(t *testing.T) {
 	if len(idx.Tickets) == 0 {
 		t.Error("indexed no tickets at all")
 	}
+	t.Logf("localTasks=%d", len(idx.LocalTasks))
+	for _, lt := range idx.LocalTasks {
+		t.Logf("  %-30s done=%v archived=%v path=%q", lt.Title, lt.Done, lt.Archived, lt.Path)
+	}
 }

@@ -131,7 +131,12 @@ space the two share. Items with no clock time are counted separately rather than
 pinned to an invented hour.
 
 A ticket row expands to show its subtasks, foldable with `z`; a folded row still
-reports its count.
+reports its count. Overdue is the same kind of row — a carried-over ticket
+still shows and lets you work its subtasks, `a`dd a note, set a deadline, and
+so on, exactly as it did in Today — and `T` is the way back: it resets the
+task's day, without touching a deadline it may separately have missed, so a
+task that is both carried-over and past its deadline still shows in Overdue by
+the deadline afterwards, now alongside also showing in Today.
 
 ### 2 — PARA
 
@@ -223,6 +228,7 @@ the coming Friday.
 | `D` | deadline and reminder picker (`c` for a custom offset) |
 | `d` / `i` | delete / mark important |
 | `z` | fold a ticket's subtasks |
+| `T` | move a carried-over task in Overdue back to today |
 | `I` / `U` | filter important / unfinished |
 | `tab` `↑↓ jk` | move |
 | `p` `r` `n` | pomodoro start-pause, reset, skip |

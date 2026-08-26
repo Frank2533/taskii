@@ -125,8 +125,9 @@ func (a *App) moveParaSelection(delta int) {
 			return
 		}
 		a.vault.treeSel = clamp(a.vault.treeSel+delta, 0, len(rows)-1)
+		a.vault.treeKey = rows[a.vault.treeSel].key(a.idx)
 		a.vault.treeScroll = scrollWindow(a.vault.treeSel, a.vault.treeScroll, a.paraGeometry().height-2, len(rows))
-		a.vault.listSel, a.vault.listScroll = 0, 0
+		a.vault.listSel, a.vault.listSelKey, a.vault.listScroll = 0, "", 0
 		a.vault.detailSel, a.vault.detailScroll = 0, 0
 	case paraList:
 		list := a.visibleTickets()
@@ -134,6 +135,7 @@ func (a *App) moveParaSelection(delta int) {
 			return
 		}
 		a.vault.listSel = clamp(a.vault.listSel+delta, 0, len(list)-1)
+		a.vault.listSelKey = list[a.vault.listSel].Path
 		a.vault.listScroll = scrollWindow(a.vault.listSel, a.vault.listScroll, a.paraGeometry().height-2, len(list))
 		a.vault.detailSel, a.vault.detailScroll = 0, 0
 	case paraDetail:

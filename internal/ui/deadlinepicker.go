@@ -25,27 +25,23 @@ type deadlinePicker struct {
 // It acts on the stored task by ID rather than on the row copy, since the
 // lists are sorted and filtered views.
 func (a *App) applyDeadline(due *time.Time, remind *time.Duration) bool {
-	rows := a.todayRows()
-	var id string
-	switch a.focus {
-	case focusToday:
-		if a.todaySelected >= 0 && a.todaySelected < len(rows) {
-			r := rows[a.todaySelected]
-			if r.isSub {
+	// Today and Overdue are both row-based, so a subtask row is resolved the
+	// same way regardless of which pane it is showing in — a carried-over
+	// ticket's subtasks can have their own deadline set exactly as before.
+	if a.focus == focusToday || a.focus == focusOverdue {
+		rows := a.rowsFor(a.focus)
+		sel := a.currentSelected()
+		if sel >= 0 && sel < len(rows) {
+			if r := rows[sel]; r.isSub {
 				// A subtask's schedule belongs in the note, written in the
 				// conventions Obsidian plugins already read — otherwise the
 				// deadline would exist only inside taskii while the task it
 				// belongs to lives in the vault.
 				return a.applySubtaskDeadline(r, due, remind)
 			}
-			id = r.task.ID
-		}
-	case focusOverdue:
-		list := a.overdueTasks()
-		if a.overdueSelected >= 0 && a.overdueSelected < len(list) {
-			id = list[a.overdueSelected].ID
 		}
 	}
+	id := a.actionTaskID()
 	if id == "" {
 		return false
 	}
@@ -161,11 +157,11 @@ func (a *App) reindexIfNeeded() tea.Cmd {
 func (a App) selectionSchedule() (name, current string) {
 	now := a.now()
 
-	if a.focus == focusToday {
-		rows := a.todayRows()
-		if a.todaySelected >= 0 && a.todaySelected < len(rows) {
-			r := rows[a.todaySelected]
-			if r.isSub {
+	if a.focus == focusToday || a.focus == focusOverdue {
+		rows := a.rowsFor(a.focus)
+		sel := a.currentSelected()
+		if sel >= 0 && sel < len(rows) {
+			if r := rows[sel]; r.isSub {
 				return r.sub.Text, describeSchedule(
 					r.sub.Due, r.sub.HasDue, r.sub.RemindAt, r.sub.HasRemind, now)
 			}

@@ -1013,3 +1013,57 @@ sprinkling `a.err = ""` next to every existing `a.status = ...` by hand is
 exactly the kind of thing that is easy to miss once and have the bug come back.
 `settingsUI.err` and `form.err` are separate, screen-local error fields for
 their own overlays and are untouched by this.
+
+### Overdue had its own copy of every row/index bug already fixed for Today
+
+Overdue used to render as a flat `renderTaskList` over `model.Task` directly,
+built before ticket-subtask expansion existed. Once Today became row-based (a
+ticket contributes a line per subtask), every action gated on
+`a.focus == focusToday` simply had no Overdue equivalent, and everything that
+resolved a selection by raw index against `a.overdueTasks()` was quietly wrong
+the moment a carried-over ticket's subtasks were on screen — the same class of
+bug this file already documents fixing for toggle, star, delete and
+`selectedTask` earlier in the session, just not yet applied to Overdue.
+
+Today and Overdue now share one row model (`rowsFor(focus)`,
+`selectedRowTaskID(focus)`) and everything built on it — toggle, edit, add
+subtask, fold, notes, the deadline picker's subtask handling — works
+identically regardless of which of the two panes has focus.
+`renderTodayRows` gained an `overdue bool` so Overdue keeps its red styling
+after switching to the shared renderer. The inline input for edit-row and
+add-subtask is drawn under whichever pane actually opened it (tracked in
+`editingFocus`), not always Today's — before this fix, editing something in
+Overdue would show the input glued under Today, one pane away from the row
+it applied to.
+
+`T` fills the one genuine hole this class of bug didn't cover: a task that
+became overdue purely by being carried over (no missed deadline) had no path
+back to Today at all before this, short of finishing or deleting it. It only
+resets `Date`; an already-missed `Due` is left alone, so such a task can end
+up showing in both panes at once, the same as any other today-dated
+deadline-miss already did.
+
+### The tree/list selection in PARA view was tracked by position, not identity
+
+This is the actual root cause behind "reindexing does nothing to Local
+tasks": the Local tasks row (like Unfiled) only appears once there is at
+least one, so adding the first local task inserts a new row and shifts every
+row after it down by one. `treeSel` was a plain index, so the cursor
+silently landed on whatever row now sat at its old position — often an
+unrelated area — rather than the Local tasks row that had, correctly,
+just appeared. From the outside that reads as the reindex having done
+nothing, even though it had done exactly what it was supposed to.
+
+`vaultState` now tracks a `treeKey`/`listSelKey` identity (row kind + area,
+or a project's path; a ticket or local task's note path) alongside each
+index, updated whenever the user moves the cursor. `clampVaultSelections`
+re-finds that identity in the freshly rebuilt rows after every reindex before
+falling back to a plain clamp, so the cursor stays on the same logical row —
+or ticket — across a reindex that inserted or reordered rows around it, not
+just within valid range of whatever the row count happens to be now.
+
+A test proves the mechanism: select an area row known to sit after where a
+Local tasks row will be inserted, add a local task, reindex through the
+literal `r` key, and assert the selection is still on that area — confirmed to
+fail with "selection drifted from QCOM to Local tasks" when reverted to the
+old clamp-only logic, so this is not a coincidental pass.

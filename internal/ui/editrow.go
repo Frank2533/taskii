@@ -25,36 +25,33 @@ func (e editTarget) isSub() bool { return e.subPath != "" }
 func (e editTarget) empty() bool { return e.taskID == "" && e.subPath == "" }
 
 // beginEditRow opens the input primed with whatever the cursor is on.
+//
+// Today and Overdue share this: both are row-based (a ticket contributes a
+// line per subtask), so the same lookup finds either a task row or a subtask
+// row regardless of which of the two panes has focus.
 func (a App) beginEditRow() (tea.Model, tea.Cmd) {
+	if a.focus != focusToday && a.focus != focusOverdue {
+		return a, nil
+	}
+	rows := a.rowsFor(a.focus)
+	sel := a.currentSelected()
+	if sel < 0 || sel >= len(rows) {
+		return a, nil
+	}
+	r := rows[sel]
+
 	var target editTarget
 	var seed string
-
-	switch a.focus {
-	case focusToday:
-		rows := a.todayRows()
-		if a.todaySelected < 0 || a.todaySelected >= len(rows) {
-			return a, nil
-		}
-		r := rows[a.todaySelected]
-		if r.isSub {
-			target = editTarget{subPath: r.ticketPath, subLine: r.sub.Line, subText: r.sub.Text}
-			seed = r.sub.Text
-		} else {
-			target = editTarget{taskID: r.task.ID}
-			seed = r.task.Title
-		}
-	case focusOverdue:
-		list := a.overdueTasks()
-		if a.overdueSelected < 0 || a.overdueSelected >= len(list) {
-			return a, nil
-		}
-		target = editTarget{taskID: list[a.overdueSelected].ID}
-		seed = list[a.overdueSelected].Title
-	default:
-		return a, nil
+	if r.isSub {
+		target = editTarget{subPath: r.ticketPath, subLine: r.sub.Line, subText: r.sub.Text}
+		seed = r.sub.Text
+	} else {
+		target = editTarget{taskID: r.task.ID}
+		seed = r.task.Title
 	}
 
 	a.editing = target
+	a.editingFocus = a.focus
 	a.mode = modeEditRow
 	a.input.SetValue(seed)
 	a.input.Placeholder = "edit, then enter"
@@ -132,12 +129,19 @@ func (a App) commitEditRow(raw string) (tea.Model, tea.Cmd) {
 }
 
 // beginAddSubtask starts a new task line on the ticket under the cursor.
+//
+// Works from Overdue too: a carried-over ticket is still a ticket, and its
+// subtasks are exactly as addable there as when it was still in Today.
 func (a App) beginAddSubtask() (tea.Model, tea.Cmd) {
-	rows := a.todayRows()
-	if a.todaySelected < 0 || a.todaySelected >= len(rows) {
+	if a.focus != focusToday && a.focus != focusOverdue {
 		return a, nil
 	}
-	r := rows[a.todaySelected]
+	rows := a.rowsFor(a.focus)
+	sel := a.currentSelected()
+	if sel < 0 || sel >= len(rows) {
+		return a, nil
+	}
+	r := rows[sel]
 	if !r.task.IsTicket() {
 		a.setErr("subtasks belong to a ticket — select one first")
 		return a, nil
@@ -153,6 +157,7 @@ func (a App) beginAddSubtask() (tea.Model, tea.Cmd) {
 		return a, nil
 	}
 	a.editing = editTarget{subPath: path, subLine: -1}
+	a.editingFocus = a.focus
 	a.mode = modeAddSubtask
 	a.input.SetValue("")
 	a.input.Placeholder = "new subtask for " + r.task.TicketKey

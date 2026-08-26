@@ -31,7 +31,33 @@ type todayRow struct {
 // todayRows expands today's tasks, inserting each ticket's open subtasks
 // beneath it unless that ticket is collapsed.
 func (a App) todayRows() []todayRow {
-	tasks := a.todayTasks()
+	return a.rowsFor(focusToday)
+}
+
+// overdueRows is the same expansion over the Overdue list.
+//
+// Overdue used to render as a flat list built straight from model.Task, with
+// no subtask expansion at all — so a carried-over ticket showed none of its
+// tasks, and z, A, N on a subtask, and edit-a-subtask had nothing to act on
+// once a task left Today. There was only ever one reason to keep the two
+// separate: Today alone reserves room for a fully general "type a title,
+// pick a ticket from the typeahead" quick-add box. Everything else — the
+// expansion, the toggle/fold/edit/note behaviour — is the same operation
+// regardless of which pane the row happens to be sitting in today.
+func (a App) overdueRows() []todayRow {
+	return a.rowsFor(focusOverdue)
+}
+
+// rowsFor expands the given pane's task list, inserting each ticket's open
+// subtasks beneath it unless that ticket is collapsed.
+func (a App) rowsFor(focus focusedPane) []todayRow {
+	var tasks []model.Task
+	switch focus {
+	case focusOverdue:
+		tasks = a.overdueTasks()
+	default:
+		tasks = a.todayTasks()
+	}
 	rows := make([]todayRow, 0, len(tasks))
 	for _, t := range tasks {
 		rows = append(rows, todayRow{task: t})
@@ -72,8 +98,11 @@ func (a App) subtaskCounts(key string) (done, total int) {
 	return done, total
 }
 
-// renderTodayRows draws the expanded list.
-func (a App) renderTodayRows(rows []todayRow, selected, scroll, visible int, focused bool, width int) string {
+// renderTodayRows draws the expanded list. overdue applies the same red
+// styling renderTaskList used for the flat Overdue list, so switching Overdue
+// to the row-based renderer did not lose the visual cue that a task or ticket
+// is late.
+func (a App) renderTodayRows(rows []todayRow, selected, scroll, visible int, focused, overdue bool, width int) string {
 	if len(rows) == 0 {
 		return hintStyle.Render("(no tasks)") + "\n"
 	}
@@ -97,7 +126,7 @@ func (a App) renderTodayRows(rows []todayRow, selected, scroll, visible int, foc
 			if t.HasDue() {
 				t.Title += "  " + deadlineMarker(t, now)
 			}
-			lines = append(lines, renderTaskLine(t, i == selected && focused, false, width, colorPaneBg))
+			lines = append(lines, renderTaskLine(t, i == selected && focused, overdue, width, colorPaneBg))
 			continue
 		}
 		lines = append(lines, a.renderSubtaskLine(r, i == selected && focused, width))
@@ -157,16 +186,17 @@ func (a App) renderSubtaskLine(r todayRow, selected bool, width int) string {
 // the single source of truth for a ticket's subtasks and the two views cannot
 // drift apart.
 func (a App) toggleTodayRow() (App, bool) {
-	rows := a.todayRows()
-	if a.todaySelected < 0 || a.todaySelected >= len(rows) {
+	rows := a.rowsFor(a.focus)
+	sel := a.currentSelected()
+	if sel < 0 || sel >= len(rows) {
 		return a, false
 	}
-	r := rows[a.todaySelected]
+	r := rows[sel]
 	if !r.isSub {
-		// Toggle by ID, not by index. Today addresses rows while the task
-		// list addresses tasks, and an expanded ticket makes the two diverge
-		// — resolving by position would tick a different task than the one
-		// under the cursor.
+		// Toggle by ID, not by index. These panes address rows while the
+		// task list addresses tasks, and an expanded ticket makes the two
+		// diverge — resolving by position would tick a different task than
+		// the one under the cursor.
 		a.toggleTaskByID(r.task.ID)
 		return a, false
 	}
@@ -177,27 +207,36 @@ func (a App) toggleTodayRow() (App, bool) {
 	return a, true
 }
 
-// selectedTodayTaskID is the task under the cursor, "" when the cursor is on a
-// subtask or nothing is selected. Row and task indices differ once a ticket is
-// expanded, so every action on the Today pane resolves through this.
-func (a App) selectedTodayTaskID() string {
-	rows := a.todayRows()
-	if a.todaySelected < 0 || a.todaySelected >= len(rows) {
+// selectedRowTaskID is the task under the cursor in a row-based pane (Today
+// or Overdue), "" when the cursor is on a subtask or nothing is selected. Row
+// and task indices differ once a ticket is expanded, so every action on
+// either pane resolves through this rather than indexing the task list
+// directly.
+func (a App) selectedRowTaskID(focus focusedPane) string {
+	rows := a.rowsFor(focus)
+	sel := a.currentSelected()
+	if a.focus != focus {
+		// currentSelected() is keyed off a.focus; asking about a pane that
+		// is not focused has no defined selection.
 		return ""
 	}
-	if rows[a.todaySelected].isSub {
+	if sel < 0 || sel >= len(rows) {
 		return ""
 	}
-	return rows[a.todaySelected].task.ID
+	if rows[sel].isSub {
+		return ""
+	}
+	return rows[sel].task.ID
 }
 
 // toggleCollapseTodayRow folds or unfolds the ticket under the cursor.
 func (a *App) toggleCollapseTodayRow() {
-	rows := a.todayRows()
-	if a.todaySelected < 0 || a.todaySelected >= len(rows) {
+	rows := a.rowsFor(a.focus)
+	sel := a.currentSelected()
+	if sel < 0 || sel >= len(rows) {
 		return
 	}
-	r := rows[a.todaySelected]
+	r := rows[sel]
 	if !r.task.IsTicket() {
 		return
 	}
@@ -210,6 +249,40 @@ func (a *App) toggleCollapseTodayRow() {
 			a.persist()
 			return
 		}
+	}
+}
+
+// bumpToToday resets the Date on the task under the cursor to today.
+//
+// This is the only undo there was no path back from before: a carried-over
+// task (Date before today, no deadline miss involved) had no way back to
+// Today except finishing or deleting it — there was no way to say "no,
+// actually, today." A task whose deadline has separately been missed keeps
+// that deadline, so it can still be found in Overdue afterwards too; this
+// only ever touches which day the task is filed under, the same distinction
+// the rest of the deadline machinery in this codebase already draws between
+// Date and Due.
+func (a *App) bumpToToday() {
+	id := a.actionTaskID()
+	if id == "" {
+		rows := a.rowsFor(a.focus)
+		sel := a.currentSelected()
+		if sel >= 0 && sel < len(rows) && rows[sel].isSub {
+			// A subtask has no Date of its own to bump, only its parent
+			// ticket does.
+			a.setErr("select the task or ticket itself, not one of its subtasks")
+		}
+		return
+	}
+	for i := range a.tasks {
+		if a.tasks[i].ID != id {
+			continue
+		}
+		a.tasks[i].Date = a.now().Format(dateFormat)
+		a.persist()
+		a.syncLocalTask(id)
+		a.setStatus("moved back to today")
+		return
 	}
 }
 

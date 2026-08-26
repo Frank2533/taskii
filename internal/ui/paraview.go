@@ -71,12 +71,46 @@ type vaultState struct {
 
 	treeSel    int
 	treeScroll int
+	// treeKey is the identity of the row treeSel points at, tracked
+	// alongside the index so a reindex can put the cursor back on the SAME
+	// row rather than whatever now happens to sit at that position. Rows like
+	// Unfiled and Local tasks appear and disappear based on whether they
+	// currently have anything in them, which shifts the position of every
+	// row after them — without this, the cursor silently drifted onto an
+	// unrelated row the moment one of those was inserted or removed, which is
+	// exactly what made a reindex that DID pick up a new local task look like
+	// it had changed nothing: the row existed, but nothing ever landed the
+	// cursor on it.
+	treeKey treeRowKey
 
 	listSel    int
 	listScroll int
+	// listSelKey is the same idea one level down: the path of the ticket (or
+	// local task, which has no key of its own) listSel points at, so
+	// re-sorting or adding a sibling in the same tree row does not silently
+	// swap which one is selected.
+	listSelKey string
 
 	detailSel    int
 	detailScroll int
+}
+
+// treeRowKey identifies a navigator row by what it MEANS rather than where it
+// sits, which is the only thing stable across a reindex.
+type treeRowKey struct {
+	kind    rowKind
+	area    string
+	project string // the project's note path, since idx.Projects can reorder too
+}
+
+// key computes this row's identity. idx resolves a rowProject's index into a
+// stable path; every other kind is a singleton or self-identifying via area.
+func (r treeRow) key(idx *para.Index) treeRowKey {
+	k := treeRowKey{kind: r.kind, area: r.area}
+	if r.kind == rowProject && idx != nil && r.project >= 0 && r.project < len(idx.Projects) {
+		k.project = idx.Projects[r.project].Path
+	}
+	return k
 }
 
 // treeRows builds the navigator: everything, the stranded tickets, one row per

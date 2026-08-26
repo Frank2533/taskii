@@ -193,6 +193,12 @@ type App struct {
 	// editing is what an in-progress edit applies to.
 	editing editTarget
 
+	// editingFocus is which pane (Today or Overdue) modeEditRow or
+	// modeAddSubtask was opened from, so the input line is reserved and
+	// drawn under the pane it actually belongs to rather than always
+	// Today's.
+	editingFocus focusedPane
+
 	// showKeys is the "all bindings" overlay.
 	showKeys bool
 
@@ -432,7 +438,8 @@ func (a App) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case msg.err != nil:
 			a.setErr("reindex failed: " + msg.err.Error())
 		case msg.idx != nil:
-			a.setStatus(fmt.Sprintf("reindexed: %d ticket(s), %d project(s)", len(msg.idx.Tickets), len(msg.idx.Projects)))
+			a.setStatus(fmt.Sprintf("reindexed: %d ticket(s), %d project(s), %d local task(s)",
+				len(msg.idx.Tickets), len(msg.idx.Projects), len(msg.idx.LocalTasks)))
 		}
 		return a, nil
 
@@ -666,16 +673,52 @@ func (a App) updateVaultAdding(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 // clampVaultSelections keeps the PARA view's cursors inside the freshly
 // rebuilt index.
 func (a *App) clampVaultSelections() {
-	if rows := a.treeRows(); len(rows) > 0 {
-		a.vault.treeSel = clamp(a.vault.treeSel, 0, len(rows)-1)
+	// Re-find each selection by identity before falling back to a plain
+	// clamp. This runs after every reindex, and rows like Unfiled and Local
+	// tasks appear and disappear based on whether they currently have
+	// anything in them — inserting or removing one shifts the position of
+	// every row after it, so clamping the OLD index against the NEW row
+	// count would silently land the cursor on a completely different row
+	// rather than keeping it on the one the user actually had selected.
+	rows := a.treeRows()
+	if len(rows) > 0 {
+		found := false
+		for i, r := range rows {
+			if r.key(a.idx) == a.vault.treeKey {
+				a.vault.treeSel = i
+				found = true
+				break
+			}
+		}
+		if !found {
+			a.vault.treeSel = clamp(a.vault.treeSel, 0, len(rows)-1)
+		}
+		a.vault.treeKey = rows[a.vault.treeSel].key(a.idx)
 	} else {
 		a.vault.treeSel = 0
+		a.vault.treeKey = treeRowKey{}
 	}
+
 	if list := a.visibleTickets(); len(list) > 0 {
-		a.vault.listSel = clamp(a.vault.listSel, 0, len(list)-1)
+		found := false
+		if a.vault.listSelKey != "" {
+			for i, t := range list {
+				if t.Path == a.vault.listSelKey {
+					a.vault.listSel = i
+					found = true
+					break
+				}
+			}
+		}
+		if !found {
+			a.vault.listSel = clamp(a.vault.listSel, 0, len(list)-1)
+		}
+		a.vault.listSelKey = list[a.vault.listSel].Path
 	} else {
 		a.vault.listSel = 0
+		a.vault.listSelKey = ""
 	}
+
 	if t, ok := a.selectedTicket(); ok && len(t.Checkboxes) > 0 {
 		a.vault.detailSel = clamp(a.vault.detailSel, 0, len(t.Checkboxes)-1)
 	} else {
@@ -934,10 +977,14 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 			}
 			return a, nil
 		}
-		if a.focus == focusToday {
+		if a.focus == focusToday || a.focus == focusOverdue {
 			// A ticket's subtasks live in the vault note, so toggling one
 			// writes there rather than to any local copy — the note stays the
 			// single source of truth and the two views cannot drift apart.
+			// This also covers a carried-over ticket in Overdue: before rows
+			// were unified, toggling one of its subtasks there resolved to no
+			// task at all (a subtask row has no task ID of its own) and
+			// silently did nothing.
 			next, reindex := a.toggleTodayRow()
 			if reindex {
 				return next, loadIndex(next.vaultPath, next.loc)
@@ -948,7 +995,7 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return a, nil
 
 	case "A":
-		if a.focus == focusToday {
+		if a.focus == focusToday || a.focus == focusOverdue {
 			return a.beginAddSubtask()
 		}
 		return a, nil
@@ -974,8 +1021,18 @@ func (a App) updateNormal(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 	case "z":
 		// Fold a ticket row away without losing sight of its progress: the
 		// collapsed row still reports its subtask count.
-		if a.focus == focusToday {
+		if a.focus == focusToday || a.focus == focusOverdue {
 			a.toggleCollapseTodayRow()
+			a.clampSelections()
+		}
+		return a, nil
+
+	case "T":
+		// Only meaningful on a task that is overdue purely from being
+		// carried over — moving a subtask row "back to today" has no
+		// definition, since a subtask has no Date of its own to bump.
+		if a.focus == focusOverdue {
+			a.bumpToToday()
 			a.clampSelections()
 		}
 		return a, nil
@@ -1540,6 +1597,8 @@ func (a *App) moveSelection(delta int) {
 		// Today addresses rows, not tasks: an expanded ticket contributes a
 		// line per subtask, so a task count would stop short of the list.
 		n = len(a.todayRows())
+	case focusOverdue:
+		n = len(a.overdueRows())
 	}
 	if n == 0 {
 		return
@@ -1637,7 +1696,11 @@ func (a *App) clampSelections() {
 	if a.todaySelected < 0 {
 		a.todaySelected = 0
 	}
-	overdueLen := len(a.overdueTasks())
+	// Overdue is row-based too, so its selection is clamped against rows —
+	// clamping against len(a.overdueTasks()) here would under-clamp the
+	// moment a carried-over ticket's subtasks pushed the row count past the
+	// task count, leaving the cursor pointed past the end of the list.
+	overdueLen := len(a.overdueRows())
 	if a.overdueSelected >= overdueLen {
 		a.overdueSelected = overdueLen - 1
 	}
@@ -1655,12 +1718,12 @@ func (a *App) clampSelections() {
 
 // actionTaskID is the task a keystroke applies to in the focused pane.
 //
-// Today addresses rows and the other panes address tasks, so this is the one
-// place that difference is resolved; acting on a raw index would hit the wrong
-// task whenever a ticket is expanded.
+// Today and Overdue both address rows, and the other panes address tasks, so
+// this is the one place that difference is resolved; acting on a raw index
+// would hit the wrong task whenever a ticket is expanded.
 func (a App) actionTaskID() string {
-	if a.focus == focusToday {
-		return a.selectedTodayTaskID()
+	if a.focus == focusToday || a.focus == focusOverdue {
+		return a.selectedRowTaskID(a.focus)
 	}
 	list := a.currentList()
 	sel := a.currentSelected()
@@ -1823,6 +1886,56 @@ func (a *App) persist() {
 // is no task list, so it returns nil rather than falling through to Overdue —
 // paired with currentSelected() returning notesSelected, an `else` here made
 // every task operation silently act on an arbitrary overdue row.
+// renderRowInputLine draws the inline text input used by quick-add, edit-row
+// and add-subtask, plus the ticket typeahead when withSuggestions is set
+// (quick-add only — editing an existing row or adding a subtask never
+// attaches a ticket, so there is nothing to suggest).
+//
+// paneWidth is the OUTER width of whichever pane (Today or Overdue) the input
+// is being drawn into; both call this the same way so the input looks
+// identical regardless of which pane it actually belongs to.
+func (a App) renderRowInputLine(paneWidth int, withSuggestions bool) string {
+	// Set here rather than once in NewApp so these follow theme changes.
+	a.input.TextStyle = lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
+	a.input.PlaceholderStyle = lipgloss.NewStyle().Foreground(colorMuted).Background(colorPaneBg)
+	a.input.PromptStyle = lipgloss.NewStyle().Foreground(colorAccent).Background(colorPaneBg)
+	a.input.Cursor.Style = lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
+
+	// Clip the placeholder to the field. The widget truncates a typed
+	// *value* to Width but never its placeholder, so on a narrow pane the
+	// full hint text ran past the border — and then vanished to a correct
+	// width on the first keystroke, reading as the line resizing as soon
+	// as you started typing.
+	if field := a.inputFieldWidth(); lipgloss.Width(a.input.Placeholder) > field {
+		a.input.Placeholder = fitToWidth(a.input.Placeholder, field)
+	}
+
+	// Render with Width unset and do the trailing fill ourselves. The
+	// widget's own padding differs between its two branches — the
+	// placeholder path pads to Width while the typed path pads to Width
+	// and *then* appends a cursor cell past it — so letting it size the
+	// line made the row jump wider the moment a key was pressed. Its
+	// padding also goes through TextStyle, emerging wrapped in SGR
+	// codes that a TrimRight(" ") can't strip back off.
+	//
+	// Width still matters for horizontal scrolling of long values, but
+	// that's consumed in Update (handleOverflow), not here, so clearing
+	// it at render time costs nothing. View has a value receiver, so
+	// this only touches the local copy used for this frame.
+	a.input.Width = 0
+	inputLine := inputPromptStyle.Render("+ ") + a.input.View()
+	if pad := (paneWidth - 4) - lipgloss.Width(inputLine); pad > 0 {
+		inputLine += lipgloss.NewStyle().Background(colorPaneBg).Render(strings.Repeat(" ", pad))
+	}
+	out := "\n" + inputLine
+	if withSuggestions {
+		if s := a.renderSuggestions(a.addSuggestions(), paneWidth-4); s != "" {
+			out += "\n" + s
+		}
+	}
+	return out
+}
+
 func (a App) currentList() []model.Task {
 	switch a.focus {
 	case focusToday:
@@ -2073,17 +2186,19 @@ func (a App) helpGroups() []helpGroup {
 	// Adding is Today-only (there's no such thing as adding a task that's
 	// already overdue), so the hint is omitted when Overdue has focus rather
 	// than advertising a key that does nothing.
-	taskKeys := []helpKey{{"a", "add"}}
-	if a.focus == focusOverdue {
-		taskKeys = nil
+	// Adding a fresh task with the ticket typeahead is Today-only — there is
+	// no sense adding straight into Overdue — but everything else here now
+	// works identically on a carried-over row.
+	taskKeys := []helpKey{}
+	if a.focus == focusToday {
+		taskKeys = append(taskKeys, helpKey{"a", "add"})
+	} else {
+		taskKeys = append(taskKeys, helpKey{"T", "back to today"})
 	}
 	taskKeys = append(taskKeys,
 		helpKey{"e", "edit"}, helpKey{"space/enter", "toggle"},
-		helpKey{"D", "deadline"}, helpKey{"d", "delete"}, helpKey{"i", "important"})
-	if a.focus == focusToday {
-		taskKeys = append(taskKeys, helpKey{"A", "subtask"}, helpKey{"z", "fold"})
-	}
-	taskKeys = append(taskKeys, helpKey{"N", "note"})
+		helpKey{"D", "deadline"}, helpKey{"d", "delete"}, helpKey{"i", "important"},
+		helpKey{"A", "subtask"}, helpKey{"z", "fold"}, helpKey{"N", "note"})
 
 	return []helpGroup{
 		{"Task", taskKeys},
@@ -2141,7 +2256,15 @@ func (a App) visibleRowsFor(focus focusedPane) int {
 	// otherwise the pane grows by a line whenever "N more" starts appearing.
 	indicatorLines := 1
 	rows := contentHeight - indicatorLines
-	if focus == focusToday && (a.mode == modeAdding || a.mode == modeEditRow || a.mode == modeAddSubtask) {
+	// modeAdding (quick-add with the ticket typeahead) stays Today-only —
+	// there is no sense adding a task directly into Overdue — but editing a
+	// row and adding a subtask now work from either pane, so both reserve
+	// their input line under whichever pane they were actually opened from,
+	// rather than always Today's.
+	if (a.mode == modeEditRow || a.mode == modeAddSubtask) && focus == a.editingFocus {
+		rows-- // reserve a line for the inline input
+	}
+	if focus == focusToday && a.mode == modeAdding {
 		rows-- // reserve a line for the inline input
 		// The typeahead sits under the input, so its rows come out of the
 		// list too or the pane would grow as you type.
@@ -2234,44 +2357,11 @@ func (a App) View() string {
 	today := a.todayTasks()
 	todayVisible := a.visibleRowsFor(focusToday)
 	todayRows := a.todayRows()
-	todayBody := a.renderTodayRows(todayRows, a.todaySelected, a.todayScroll, todayVisible, a.focus == focusToday, leftWidth-4)
-	if a.mode == modeAdding || a.mode == modeEditRow || a.mode == modeAddSubtask {
-		// Set here rather than once in NewApp so these follow theme changes.
-		a.input.TextStyle = lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
-		a.input.PlaceholderStyle = lipgloss.NewStyle().Foreground(colorMuted).Background(colorPaneBg)
-		a.input.PromptStyle = lipgloss.NewStyle().Foreground(colorAccent).Background(colorPaneBg)
-		a.input.Cursor.Style = lipgloss.NewStyle().Foreground(colorText).Background(colorPaneBg)
-
-		// Clip the placeholder to the field. The widget truncates a typed
-		// *value* to Width but never its placeholder, so on a narrow pane the
-		// full hint text ran past the border — and then vanished to a correct
-		// width on the first keystroke, reading as the line resizing as soon
-		// as you started typing.
-		if field := a.inputFieldWidth(); lipgloss.Width(a.input.Placeholder) > field {
-			a.input.Placeholder = fitToWidth(a.input.Placeholder, field)
-		}
-
-		// Render with Width unset and do the trailing fill ourselves. The
-		// widget's own padding differs between its two branches — the
-		// placeholder path pads to Width while the typed path pads to Width
-		// and *then* appends a cursor cell past it — so letting it size the
-		// line made the row jump wider the moment a key was pressed. Its
-		// padding also goes through TextStyle, emerging wrapped in SGR
-		// codes that a TrimRight(" ") can't strip back off.
-		//
-		// Width still matters for horizontal scrolling of long values, but
-		// that's consumed in Update (handleOverflow), not here, so clearing
-		// it at render time costs nothing. View has a value receiver, so
-		// this only touches the local copy used for this frame.
-		a.input.Width = 0
-		inputLine := inputPromptStyle.Render("+ ") + a.input.View()
-		if pad := (leftWidth - 4) - lipgloss.Width(inputLine); pad > 0 {
-			inputLine += lipgloss.NewStyle().Background(colorPaneBg).Render(strings.Repeat(" ", pad))
-		}
-		todayBody += "\n" + inputLine
-		if s := a.renderSuggestions(a.addSuggestions(), leftWidth-4); s != "" {
-			todayBody += "\n" + s
-		}
+	todayBody := a.renderTodayRows(todayRows, a.todaySelected, a.todayScroll, todayVisible, a.focus == focusToday, false, leftWidth-4)
+	if a.mode == modeAdding {
+		todayBody += a.renderRowInputLine(leftWidth, true)
+	} else if (a.mode == modeEditRow || a.mode == modeAddSubtask) && a.editingFocus == focusToday {
+		todayBody += a.renderRowInputLine(leftWidth, false)
 	}
 	todayPane := renderPane(fmt.Sprintf("Today (%d)%s", len(today), filters), todayBody, a.focus == focusToday, leftWidth, todayHeight)
 
@@ -2281,7 +2371,11 @@ func (a App) View() string {
 	// Today and Overdue are stacked at the same width.
 	overdueWidth := leftWidth
 	overdueVisible := a.visibleRowsFor(focusOverdue)
-	overdueBody := renderTaskList(decorateDeadlines(overdue, a.now()), a.overdueSelected, a.overdueScroll, overdueVisible, a.focus == focusOverdue, true, overdueWidth-4)
+	overdueRows := a.overdueRows()
+	overdueBody := a.renderTodayRows(overdueRows, a.overdueSelected, a.overdueScroll, overdueVisible, a.focus == focusOverdue, true, overdueWidth-4)
+	if (a.mode == modeEditRow || a.mode == modeAddSubtask) && a.editingFocus == focusOverdue {
+		overdueBody += a.renderRowInputLine(overdueWidth, false)
+	}
 	overduePane := renderPane(fmt.Sprintf("Overdue (%d)%s", len(overdue), filters), overdueBody, a.focus == focusOverdue, overdueWidth, overdueHeight)
 
 	tasks := lipgloss.JoinVertical(lipgloss.Left, todayPane, overduePane)
